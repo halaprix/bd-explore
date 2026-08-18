@@ -35,7 +35,7 @@ class TestIndex(unittest.TestCase):
         self.sample_issues = [
             {
                 "id": "bd-100",
-                "title": "Epic Root Issue",
+                "title": "Epic Root Issue for PR #99",
                 "status": "in_progress",
                 "issue_type": "epic",
                 "priority": 1,
@@ -156,13 +156,20 @@ class TestIndex(unittest.TestCase):
             mems = load_memories()
             self.assertEqual(mems, [])
 
-    def test_load_memories_dict_output(self):
+    def test_load_memories_dict_output_with_cwd(self):
         mock_res = MagicMock(returncode=0, stdout=json.dumps({"arch_decision": "Use SQLite FTS5"}))
-        with patch("subprocess.run", return_value=mock_res):
-            mems = load_memories()
+        with patch("subprocess.run", return_value=mock_res) as mock_run:
+            mems = load_memories(cwd=self.root)
             self.assertEqual(len(mems), 1)
             self.assertEqual(mems[0]["key"], "arch_decision")
             self.assertEqual(mems[0]["content"], "Use SQLite FTS5")
+            mock_run.assert_called_once_with(
+                ["bd", "memories", "--json"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=self.root,
+            )
 
     def test_load_memories_list_output(self):
         mock_res = MagicMock(returncode=0, stdout=json.dumps([{"key": "rule1", "content": "Keep zero deps"}]))
@@ -186,13 +193,14 @@ class TestIndex(unittest.TestCase):
         self.assertIn(("bd-101", "bd-100"), mention_pairs)
         self.assertIn(("bd-101", "bd-102"), mention_pairs)
 
-        # Check GH ref edges
-        gh_refs = con.execute("SELECT src, dst, kind FROM edges WHERE kind='gh-ref'").fetchall()
+        # Check GH ref edges (including PR #99 from bd-100 title)
+        gh_refs = [(r[0], r[1], r[2]) for r in con.execute("SELECT src, dst, kind FROM edges WHERE kind='gh-ref'").fetchall()]
+        self.assertIn(("bd-100", "#99", "gh-ref"), gh_refs)
         self.assertIn(("bd-101", "#42", "gh-ref"), gh_refs)
         self.assertIn(("bd-101", "#43", "gh-ref"), gh_refs)
 
         # Check dependency edges
-        dep_edges = con.execute("SELECT src, dst, kind FROM edges WHERE kind='parent-child'").fetchall()
+        dep_edges = [(r[0], r[1], r[2]) for r in con.execute("SELECT src, dst, kind FROM edges WHERE kind='parent-child'").fetchall()]
         self.assertEqual(dep_edges, [("bd-101", "bd-100", "parent-child")])
 
         # Check FTS index populated
@@ -201,6 +209,14 @@ class TestIndex(unittest.TestCase):
         self.assertEqual(fts_hits[0][0], "bd-101")
 
         con.close()
+
+    def test_build_index_error_closes_con(self):
+        bad_store = self.root / "corrupt.jsonl"
+        with open(bad_store, "w") as f:
+            f.write("NOT VALID JSON\n")
+        db_path = self.root / "corrupt.db"
+        with self.assertRaises(json.JSONDecodeError):
+            build_index(bad_store, db_path)
 
     def test_open_index_cache_reuse(self):
         os.environ["XDG_CACHE_HOME"] = str(self.root / "cache_home")

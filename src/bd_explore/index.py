@@ -76,12 +76,16 @@ def compose_body(rec: dict) -> str:
     return "\n\n".join(parts)
 
 
-def load_memories() -> list[dict]:
+def load_memories(cwd: Path | None = None) -> list[dict]:
     """Memories aren't in the jsonl export; pull them via the bd CLI when present.
     Degrades to empty — the index still covers all issues."""
     try:
         out = subprocess.run(
-            ["bd", "memories", "--json"], capture_output=True, text=True, timeout=30
+            ["bd", "memories", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=cwd,
         )
         if out.returncode != 0:
             return []
@@ -103,76 +107,88 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
     if db_path.exists():
         db_path.unlink()
     con = sqlite3.connect(db_path)
-    con.executescript(SCHEMA)
+    con.row_factory = sqlite3.Row
+    try:
+        con.executescript(SCHEMA)
 
-    records: list[dict] = []
-    with open(store, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
+        records: list[dict] = []
+        with open(store, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
 
-    ids = {r["id"] for r in records}
-    id_alt = "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True))
-    mention_re = re.compile(rf"\b({id_alt})\b") if ids else None
-    gh_re = re.compile(r"(?:GH |GitHub )?(?:issue |PR )?#(\d{2,5})\b")
+        ids = {r["id"] for r in records}
+        id_alt = "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True))
+        mention_re = re.compile(rf"\b({id_alt})\b") if ids else None
+        gh_re = re.compile(r"(?:GH |GitHub )?(?:issue |PR )?#(\d{2,5})\b")
 
-    docs, edges = [], set()
-    for r in records:
-        body = compose_body(r)
-        docs.append(
-            (
-                r["id"], "issue", r.get("title", ""), r.get("status", ""),
-                r.get("issue_type", ""), r.get("priority"),
-                (r.get("created_at") or "")[:10], (r.get("updated_at") or "")[:10],
-                (r.get("closed_at") or "")[:10], body,
+        docs, edges = [], set()
+        for r in records:
+            body = compose_body(r)
+            docs.append(
+                (
+                    r["id"], "issue", r.get("title", ""), r.get("status", ""),
+                    r.get("issue_type", ""), r.get("priority"),
+                    (r.get("created_at") or "")[:10], (r.get("updated_at") or "")[:10],
+                    (r.get("closed_at") or "")[:10], body,
+                )
             )
-        )
-        for d in r.get("dependencies") or []:
-            kind = d.get("type", "related")
-            if kind in DEP_KINDS:
-                edges.add((d.get("issue_id", r["id"]), d.get("depends_on_id", ""), kind))
-        if mention_re:
+            for d in r.get("dependencies") or []:
+                kind = d.get("type", "related")
+                if kind in DEP_KINDS:
+                    edges.add((d.get("issue_id", r["id"]), d.get("depends_on_id", ""), kind))
             searchable = f"{r.get('title', '')}\n{body}"
-            for m in set(mention_re.findall(searchable)):
-                if m != r["id"]:
-                    edges.add((r["id"], m, "mentions"))
-        for gh in set(gh_re.findall(body)):
-            edges.add((r["id"], f"#{gh}", "gh-ref"))
+            if mention_re:
+                for m in set(mention_re.findall(searchable)):
+                    if m != r["id"]:
+                        edges.add((r["id"], m, "mentions"))
+            for gh in set(gh_re.findall(searchable)):
+                edges.add((r["id"], f"#{gh}", "gh-ref"))
 
-    for m in load_memories():
-        docs.append(
-            (f"mem:{m['key']}", "memory", m["key"], "", "memory", None, "", "", "", m["content"])
+        repo_dir = store.parent.parent if store.parent.name == ".beads" else store.parent
+        for m in load_memories(cwd=repo_dir):
+            docs.append(
+                (f"mem:{m['key']}", "memory", m["key"], "", "memory", None, "", "", "", m["content"])
+            )
+            if mention_re:
+                for hit in set(mention_re.findall(m["content"])):
+                    edges.add((f"mem:{m['key']}", hit, "mentions"))
+
+        con.executemany("INSERT OR REPLACE INTO docs VALUES (?,?,?,?,?,?,?,?,?,?)", docs)
+        con.executemany("INSERT OR IGNORE INTO edges VALUES (?,?,?)", edges)
+        con.executemany(
+            "INSERT INTO docs_fts (id, title, body) VALUES (?,?,?)",
+            [(d[0], d[2], d[9]) for d in docs],
         )
-        if mention_re:
-            for hit in set(mention_re.findall(m["content"])):
-                edges.add((f"mem:{m['key']}", hit, "mentions"))
-
-    con.executemany("INSERT OR REPLACE INTO docs VALUES (?,?,?,?,?,?,?,?,?,?)", docs)
-    con.executemany("INSERT OR IGNORE INTO edges VALUES (?,?,?)", edges)
-    con.executemany(
-        "INSERT INTO docs_fts (id, title, body) VALUES (?,?,?)",
-        [(d[0], d[2], d[9]) for d in docs],
-    )
-    st = store.stat()
-    con.executemany(
-        "INSERT INTO meta VALUES (?,?)",
-        [("mtime", str(st.st_mtime_ns)), ("size", str(st.st_size))],
-    )
-    con.commit()
-    return con
+        st = store.stat()
+        con.executemany(
+            "INSERT INTO meta VALUES (?,?)",
+            [("mtime", str(st.st_mtime_ns)), ("size", str(st.st_size))],
+        )
+        con.commit()
+        return con
+    except Exception:
+        con.close()
+        raise
 
 
 def open_index(store: Path, force: bool = False) -> sqlite3.Connection:
     db_path = cache_db_path(store)
     if not force and db_path.exists():
+        con = None
         try:
             con = sqlite3.connect(db_path)
+            con.row_factory = sqlite3.Row
             meta = dict(con.execute("SELECT k, v FROM meta"))
             st = store.stat()
             if meta.get("mtime") == str(st.st_mtime_ns) and meta.get("size") == str(st.st_size):
                 return con
             con.close()
         except sqlite3.DatabaseError:
-            pass
+            if con is not None:
+                try:
+                    con.close()
+                except Exception:
+                    pass
     return build_index(store, db_path)
