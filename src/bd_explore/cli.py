@@ -126,13 +126,16 @@ def _handle_install(args: argparse.Namespace) -> int:
         yes=True,
     )
 
+    has_error = any(r.get("status") == "error" for r in res.get("targets", []))
+
     print("\nInstallation results:")
     for r in res.get("targets", []):
         t_name = r.get("target")
         status = r.get("status")
         if status == "ok":
             files = r.get("files", [])
-            files_str = f" -> {', '.join(files)}" if files else ""
+            file_paths = [f.get("path", str(f)) if isinstance(f, dict) else str(f) for f in files]
+            files_str = f" -> {', '.join(file_paths)}" if file_paths else ""
             print(f"  ✓ {t_name}: configured ({location}){files_str}")
         elif status == "skipped":
             print(f"  - {t_name}: skipped ({r.get('message', '')})")
@@ -150,7 +153,7 @@ def _handle_install(args: argparse.Namespace) -> int:
             print(f"  ✗ beads memory: {mem.get('message', '')}")
 
     print("\nInstallation complete.")
-    return 0
+    return 1 if has_error else 0
 
 
 def _handle_uninstall(args: argparse.Namespace) -> int:
@@ -172,11 +175,16 @@ def _handle_uninstall(args: argparse.Namespace) -> int:
         location=location,
     )
 
+    has_error = any(r.get("status") == "error" for r in res.get("targets", []))
+
     print("\nUninstallation results:")
     for r in res.get("targets", []):
         t_name = r.get("target")
         status = r.get("status")
         if status == "ok":
+            files = r.get("files", [])
+            file_paths = [f.get("path", str(f)) if isinstance(f, dict) else str(f) for f in files]
+            files_str = f" -> {', '.join(file_paths)}" if file_paths else ""
             print(f"  ✓ {t_name}: uninstalled")
         else:
             print(f"  ✗ {t_name}: error ({r.get('message', '')})")
@@ -192,7 +200,7 @@ def _handle_uninstall(args: argparse.Namespace) -> int:
             print(f"  ✗ beads memory: {mem.get('message', '')}")
 
     print("\nUninstallation complete.")
-    return 0
+    return 1 if has_error else 0
 
 
 def _build_explore_parser() -> argparse.ArgumentParser:
@@ -231,6 +239,7 @@ def _build_subcommand_parser(cmd: str) -> argparse.ArgumentParser:
     if cmd == "serve":
         p = argparse.ArgumentParser(prog="bd-explore serve", description="Run stdio JSON-RPC MCP server.")
         p.add_argument("--store", help="path to repo, .beads dir, or issues.jsonl")
+        p.add_argument("--mcp", action="store_true", help="run stdio JSON-RPC MCP server")
         return p
     if cmd == "install":
         p = argparse.ArgumentParser(prog="bd-explore install", description="Install bd-explore MCP server & instructions into agent platforms.")
@@ -259,75 +268,82 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # Check if a subcommand is specified as the first non-option argument
-    cmd_idx = -1
-    for i, arg in enumerate(argv):
-        if not arg.startswith("-"):
-            if arg in SUBCOMMANDS:
-                cmd_idx = i
-            break
-
-    if cmd_idx != -1:
-        cmd_name = argv[cmd_idx]
-        sub_argv = argv[:cmd_idx] + argv[cmd_idx + 1:]
-        sub_parser = _build_subcommand_parser(cmd_name)
-        sub_args = sub_parser.parse_args(sub_argv)
-
-        # Track if --location was explicitly set
-        if "-l" in sub_argv or "--location" in sub_argv:
-            setattr(sub_args, "location_explicit", True)
-
-        if cmd_name == "serve":
-            return _handle_serve(sub_args)
-        if cmd_name == "install":
-            return _handle_install(sub_args)
-        if cmd_name == "uninstall":
-            return _handle_uninstall(sub_args)
-        if cmd_name in ("print-config", "print_config", "config"):
-            return _handle_print_config(sub_args)
-
-    # Otherwise, handle explore/query/blast/rebuild/mcp options
-    parser = _build_explore_parser()
-    args = parser.parse_args(argv)
-
-    if args.mcp:
-        return _handle_serve(args)
-
-    if not args.query and not args.blast and not args.rebuild:
-        _error("bd-explore: error: give a query, --blast <id>, or --rebuild")
-
     try:
-        store = find_store(args.store)
-    except (FileNotFoundError, ValueError) as e:
-        _error(str(e))
+        # Check if a subcommand is specified as the first non-option argument
+        cmd_idx = -1
+        for i, arg in enumerate(argv):
+            if not arg.startswith("-"):
+                if arg in SUBCOMMANDS:
+                    cmd_idx = i
+                break
 
-    try:
-        con = open_index(store, force=args.rebuild)
-    except Exception as e:
-        _error(f"bd-explore: index error: {e}")
+        if cmd_idx != -1:
+            cmd_name = argv[cmd_idx]
+            sub_argv = argv[:cmd_idx] + argv[cmd_idx + 1:]
+            sub_parser = _build_subcommand_parser(cmd_name)
+            sub_args = sub_parser.parse_args(sub_argv)
 
-    try:
-        if args.blast:
-            try:
-                data = blast_data(con, args.blast)
-                print(format_blast(con, data))
-                return 0
-            except ValueError as e:
-                _error(str(e))
+            # Track if --location was explicitly set
+            if "-l" in sub_argv or "--location" in sub_argv:
+                setattr(sub_args, "location_explicit", True)
 
-        if not args.query:
-            if args.rebuild:
-                n = con.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-                print(f"rebuilt: {n} docs from {store}")
-                return 0
+            if cmd_name == "serve":
+                return _handle_serve(sub_args)
+            if cmd_name == "install":
+                return _handle_install(sub_args)
+            if cmd_name == "uninstall":
+                return _handle_uninstall(sub_args)
+            if cmd_name in ("print-config", "print_config", "config"):
+                return _handle_print_config(sub_args)
+
+        # Otherwise, handle explore/query/blast/rebuild/mcp options
+        parser = _build_explore_parser()
+        args = parser.parse_args(argv)
+
+        if args.mcp:
+            return _handle_serve(args)
+
+        if not args.query and not args.blast and not args.rebuild:
             _error("bd-explore: error: give a query, --blast <id>, or --rebuild")
 
-        text, filters = parse_query(" ".join(args.query))
-        rows = search(con, text, filters, args.limit)
-        print(format_output(con, rows, args.budget))
+        try:
+            store = find_store(args.store)
+        except (FileNotFoundError, ValueError) as e:
+            _error(str(e))
+
+        try:
+            con = open_index(store, force=args.rebuild)
+        except Exception as e:
+            _error(f"bd-explore: index error: {e}")
+
+        try:
+            if args.blast:
+                try:
+                    data = blast_data(con, args.blast)
+                    print(format_blast(con, data))
+                    return 0
+                except ValueError as e:
+                    _error(str(e))
+
+            if not args.query:
+                if args.rebuild:
+                    n = con.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
+                    print(f"rebuilt: {n} docs from {store}")
+                    return 0
+                _error("bd-explore: error: give a query, --blast <id>, or --rebuild")
+
+            text, filters = parse_query(" ".join(args.query))
+            rows = search(con, text, filters, args.limit)
+            print(format_output(con, rows, args.budget))
+            return 0
+        finally:
+            con.close()
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
         return 0
-    finally:
-        con.close()
 
 
 if __name__ == "__main__":

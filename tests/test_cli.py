@@ -256,7 +256,7 @@ class TestCli(unittest.TestCase):
             mock_installer.return_value = {
                 "status": "ok",
                 "location": "global",
-                "targets": [{"target": "claude", "status": "ok", "files": ["/mock/claude.json"]}],
+                "targets": [{"target": "claude", "status": "ok", "files": [{"path": "/mock/claude.json", "action": "updated"}]}],
                 "memory": {"status": "injected", "command": "bd remember"},
             }
             buf = io.StringIO()
@@ -280,7 +280,7 @@ class TestCli(unittest.TestCase):
             mock_installer.return_value = {
                 "status": "ok",
                 "location": "project",
-                "targets": [{"target": "cursor", "status": "ok", "files": [".cursor/mcp.json"]}],
+                "targets": [{"target": "cursor", "status": "ok", "files": [{"path": ".cursor/mcp.json", "action": "updated"}]}],
                 "memory": {"status": "skipped", "message": "already injected"},
             }
             buf = io.StringIO()
@@ -306,8 +306,8 @@ class TestCli(unittest.TestCase):
                 "status": "ok",
                 "location": "global",
                 "targets": [
-                    {"target": "claude", "status": "ok", "files": ["/mock/claude.json"]},
-                    {"target": "gemini", "status": "ok", "files": ["/mock/gemini.json"]},
+                    {"target": "claude", "status": "ok", "files": [{"path": "/mock/claude.json", "action": "updated"}]},
+                    {"target": "gemini", "status": "ok", "files": [{"path": "/mock/gemini.json", "action": "updated"}]},
                 ],
                 "memory": {"status": "injected", "command": "bd remember"},
             }
@@ -341,6 +341,42 @@ class TestCli(unittest.TestCase):
             out = buf.getvalue()
             self.assertIn("Installation cancelled", out)
 
+    def test_install_subcommand_unmocked_e2e_agents_md(self):
+        from bd_explore.cli import main
+
+        orig_cwd = os.getcwd()
+        os.chdir(self.root)
+        try:
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = main(["install", "--yes", "-t", "agents_md", "-l", "project"])
+            self.assertEqual(code, 0)
+            out = buf.getvalue()
+            self.assertIn("agents_md: configured (project)", out)
+            self.assertIn("Installation complete", out)
+            agents_md_file = self.root / "AGENTS.md"
+            self.assertTrue(agents_md_file.exists())
+            self.assertIn("bd-explore", agents_md_file.read_text(encoding="utf-8"))
+        finally:
+            os.chdir(orig_cwd)
+
+    def test_install_subcommand_target_error_exit_code(self):
+        from bd_explore.cli import main
+
+        with patch("bd_explore.cli.run_installer") as mock_installer:
+            mock_installer.return_value = {
+                "status": "ok",
+                "location": "global",
+                "targets": [{"target": "claude", "status": "error", "message": "Permission denied", "files": []}],
+                "memory": {"status": "skipped"},
+            }
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = main(["install", "--yes", "-t", "claude"])
+            self.assertEqual(code, 1)
+            out = buf.getvalue()
+            self.assertIn("error (Permission denied)", out)
+
     def test_uninstall_subcommand_yes_flag(self):
         from bd_explore.cli import main
 
@@ -348,7 +384,7 @@ class TestCli(unittest.TestCase):
             mock_uninstaller.return_value = {
                 "status": "ok",
                 "location": "global",
-                "targets": [{"target": "claude", "status": "ok", "files": ["/mock/claude.json"]}],
+                "targets": [{"target": "claude", "status": "ok", "files": [{"path": "/mock/claude.json", "action": "removed"}]}],
                 "memory": {"status": "removed", "command": "bd forget bd-explore"},
             }
             buf = io.StringIO()
@@ -377,6 +413,38 @@ class TestCli(unittest.TestCase):
             mock_uninstaller.assert_not_called()
             out = buf.getvalue()
             self.assertIn("Uninstallation cancelled", out)
+
+    def test_uninstall_subcommand_target_error_exit_code(self):
+        from bd_explore.cli import main
+
+        with patch("bd_explore.cli.run_uninstaller") as mock_uninstaller:
+            mock_uninstaller.return_value = {
+                "status": "ok",
+                "location": "global",
+                "targets": [{"target": "claude", "status": "error", "message": "Permission denied", "files": []}],
+                "memory": {"status": "skipped"},
+            }
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = main(["uninstall", "--yes", "-t", "claude"])
+            self.assertEqual(code, 1)
+            out = buf.getvalue()
+            self.assertIn("error (Permission denied)", out)
+
+    def test_serve_subcommand_mcp_flag(self):
+        from bd_explore.cli import main
+
+        with patch("bd_explore.cli.run_mcp_server") as mock_mcp:
+            code = main(["serve", "--mcp", "--store", str(self.store_file)])
+            self.assertEqual(code, 0)
+            mock_mcp.assert_called_once_with(default_store=self.store_file)
+
+    def test_broken_pipe_error_handling(self):
+        from bd_explore.cli import main
+
+        with patch("builtins.print", side_effect=BrokenPipeError):
+            code = main(["--store", str(self.store_file), "JWT"])
+            self.assertEqual(code, 0)
 
     def test_legacy_bd_explore_shim(self):
         legacy_file = Path(__file__).resolve().parents[1] / "bd_explore.py"
