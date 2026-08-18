@@ -279,5 +279,47 @@ class TestSearch(unittest.TestCase):
         self.assertIn("epic-1  Authentication Epic [in_progress]", out)
 
 
+    def test_search_filter_priority_formats(self):
+        rows = search(self.con, "", {"priority": ["P1"]}, limit=10)
+        self.assertEqual(len(rows), 2)  # epic-1 and task-2
+        # Non-numeric should not crash
+        rows_invalid = search(self.con, "", {"priority": ["invalid", "p2"]}, limit=10)
+        self.assertEqual(len(rows_invalid), 1)  # task-1
+
+    def test_blast_data_prefers_exact_match(self):
+        extra_issue = {
+            "id": "task-10",
+            "title": "Sub task 10",
+            "status": "open",
+            "issue_type": "task",
+            "priority": 1,
+            "created_at": "2026-08-01",
+            "updated_at": "2026-08-01",
+            "description": "Extra task",
+        }
+        with open(self.store_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(extra_issue) + "\n")
+        con = build_index(self.store_file, self.db_path)
+        data = blast_data(con, "task-1")
+        self.assertEqual(data["root"]["id"], "task-1")
+        con.close()
+
+    def test_render_header_none_status(self):
+        doc = {
+            "id": "task-none",
+            "kind": "issue",
+            "title": "None Status Task",
+            "status": None,
+            "itype": "task",
+            "priority": 1,
+            "updated": "2026-08-01",
+            "closed": None,
+            "body": "Body",
+        }
+        h = render_header(doc)
+        self.assertIn("═══ task-none [ · P1 · task", h)
+
+
 if __name__ == "__main__":
     unittest.main()
+

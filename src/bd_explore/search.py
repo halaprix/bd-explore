@@ -64,8 +64,14 @@ def search(
         where.append(f"d.itype IN ({','.join('?' * len(filters['type']))})")
         params.extend(filters["type"])
     if filters.get("priority"):
-        where.append(f"d.priority IN ({','.join('?' * len(filters['priority']))})")
-        params.extend(int(p) for p in filters["priority"])
+        priorities: list[int] = []
+        for p in filters["priority"]:
+            cleaned = str(p).lstrip("pP")
+            if cleaned.isdigit():
+                priorities.append(int(cleaned))
+        if priorities:
+            where.append(f"d.priority IN ({','.join('?' * len(priorities))})")
+            params.extend(priorities)
     if filters.get("id"):
         where.append("(" + " OR ".join("d.id LIKE ?" for _ in filters["id"]) + ")")
         params.extend(f"%{i}%" for i in filters["id"])
@@ -137,7 +143,10 @@ def neighborhood(con: sqlite3.Connection, bead_id: str) -> dict[str, list[tuple[
 
 def blast_data(con: sqlite3.Connection, bead_id: str) -> dict[str, Any]:
     con.row_factory = sqlite3.Row
-    row = con.execute("SELECT * FROM docs WHERE id LIKE ?", (f"%{bead_id}%",)).fetchone()
+    row = con.execute(
+        "SELECT * FROM docs WHERE id LIKE ? ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1",
+        (f"%{bead_id}%", bead_id),
+    ).fetchone()
     if not row:
         raise ValueError(f"bd-explore: no bead matching '{bead_id}'")
 
@@ -180,7 +189,8 @@ def render_header(r: sqlite3.Row | dict[str, Any]) -> str:
         return f"═══ {r['id']} [MEMORY]"
     prio = f"P{r['priority']}" if r["priority"] is not None else "P?"
     stamp = f"updated {r['updated']}" + (f", closed {r['closed']}" if r["closed"] else "")
-    return f"═══ {r['id']} [{r['status'].upper()} · {prio} · {r['itype']} · {stamp}]\n    {r['title']}"
+    status_str = (r["status"] or "").upper()
+    return f"═══ {r['id']} [{status_str} · {prio} · {r['itype']} · {stamp}]\n    {r['title']}"
 
 
 def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int) -> str:
