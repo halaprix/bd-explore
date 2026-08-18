@@ -111,14 +111,21 @@ def load_memories(cwd: Path | None = None) -> list[dict]:
 
 
 def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
-    if db_path.exists():
-        db_path.unlink()
-    con = sqlite3.connect(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_db = db_path.with_name(f"{db_path.name}.tmp.{os.getpid()}")
+    if tmp_db.exists():
+        try:
+            tmp_db.unlink()
+        except OSError:
+            pass
+
+    con = sqlite3.connect(tmp_db)
     con.row_factory = sqlite3.Row
     try:
         con.executescript(SCHEMA)
 
-        records: list[dict] = []
+        # Deduplicate records by ID (keep latest occurrence)
+        records_map: dict[str, dict] = {}
         with open(store, encoding="utf-8") as f:
             for line_no, line in enumerate(f, 1):
                 line = line.strip()
@@ -127,11 +134,12 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
                 try:
                     data = json.loads(line)
                     if isinstance(data, dict) and data.get("id"):
-                        records.append(data)
+                        records_map[data["id"]] = data
                 except json.JSONDecodeError:
                     continue
 
-        ids = {r["id"] for r in records}
+        records = list(records_map.values())
+        ids = set(records_map.keys())
         id_alt = "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True))
         mention_re = re.compile(rf"\b({id_alt})\b") if ids else None
         gh_re = re.compile(r"(?:GH |GitHub )?(?:issue |PR )?#(\d{2,5})\b")
@@ -150,10 +158,16 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
             for d in r.get("dependencies") or []:
                 if not isinstance(d, dict):
                     continue
+                src_id = d.get("issue_id") or r["id"]
+                dst_id = d.get("depends_on_id")
                 kind = d.get("type") or "related"
-                depends_on = d.get("depends_on_id")
-                if depends_on:
-                    edges.add((d.get("issue_id", r["id"]), depends_on, kind))
+                if not dst_id or not src_id:
+                    continue
+                if kind == "blocked-by":
+                    edges.add((dst_id, src_id, "blocks"))
+                else:
+                    edges.add((src_id, dst_id, kind))
+
             searchable = f"{r.get('title', '')}\n{body}"
             if mention_re:
                 for m in set(mention_re.findall(searchable)):
@@ -187,9 +201,21 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
             ],
         )
         con.commit()
-        return con
-    except Exception:
         con.close()
+        os.replace(tmp_db, db_path)
+        final_con = sqlite3.connect(db_path)
+        final_con.row_factory = sqlite3.Row
+        return final_con
+    except Exception:
+        try:
+            con.close()
+        except Exception:
+            pass
+        if tmp_db.exists():
+            try:
+                tmp_db.unlink()
+            except OSError:
+                pass
         raise
 
 

@@ -199,56 +199,99 @@ def render_header(r: sqlite3.Row | dict[str, Any]) -> str:
 
 
 def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int) -> str:
+    if budget <= 0:
+        return ""
     if not rows:
-        return "no matches — try fewer terms, or status:all"
+        msg = "no matches — try fewer terms, or status:all"
+        return msg if len(msg) <= budget else msg[:budget]
+
     con.row_factory = sqlite3.Row
     output_blocks: list[str] = []
     current_len = 0
-    per_doc_budget = max(budget // len(rows), 300)
+    num_rows = len(rows)
+    target_per_doc = max(budget // num_rows, 1)
 
     for idx, r in enumerate(rows):
-        remaining_budget = max(budget - current_len, 0)
-        if remaining_budget < 100:
-            omitted = len(rows) - idx
-            output_blocks.append(
-                f"\n… [output capped at {budget} chars; {omitted} additional hit(s) omitted. Use 'bd show <id>' or higher --budget]"
-            )
+        sep_len = 2 if output_blocks else 0
+        remaining_total = budget - current_len - sep_len
+        if remaining_total <= 0:
             break
 
         header = render_header(r)
-        body = r["body"] or "(no body)"
-        doc_budget = min(per_doc_budget, remaining_budget)
-
-        if len(body) > doc_budget:
-            body = body[:doc_budget] + f"\n… [truncated — full body: bd show {r['id']}]"
-
-        block_parts = [header, textwrap.indent(body, "    ")]
-
         hood = neighborhood(con, r["id"])
+        hood_lines = []
         if hood:
-            block_parts.append("    ── neighborhood ──")
+            hood_lines.append("    ── neighborhood ──")
             for label, items in sorted(hood.items()):
                 shown = items[:6]
                 extra = f" (+{len(items) - 6} more)" if len(items) > 6 else ""
                 names = ", ".join(f"{i}" + (f" — {t}" if t else "") for i, t in shown)
-                block_parts.append(f"    {label}: {names}{extra}")
+                hood_lines.append(f"    {label}: {names}{extra}")
+        hood_text = "\n".join(hood_lines)
 
+        # Allocate budget for this doc
+        available_for_doc = min(max(target_per_doc, 120), remaining_total)
+        body = r["body"] or "(no body)"
+        indented_body = textwrap.indent(body, "    ")
+
+        # Check full block size
+        block_parts = [header, indented_body]
+        if hood_text:
+            block_parts.append(hood_text)
         block_text = "\n".join(block_parts)
-        if current_len + len(block_text) > budget and output_blocks:
-            # Fit what we can or mark capped
-            omitted = len(rows) - idx
-            output_blocks.append(
-                f"\n… [output capped at {budget} chars; {omitted} additional hit(s) omitted. Use 'bd show <id>' or higher --budget]"
-            )
+
+        # If block_text exceeds available_for_doc, truncate body
+        if len(block_text) > available_for_doc:
+            overhead = len(header) + 1 + (len(hood_text) + 1 if hood_text else 0)
+            notice = f"… [truncated — full body: bd show {r['id']}]"
+            indented_notice = f"    {notice}"
+
+            space_for_body = available_for_doc - overhead - len(indented_notice) - 1
+            if space_for_body > 10:
+                raw_slice_len = max(space_for_body - 4, 1)
+                shortened_body = body[:raw_slice_len].rstrip()
+                indented_body = textwrap.indent(shortened_body, "    ") + "\n" + indented_notice
+            else:
+                indented_body = indented_notice
+
+            block_parts = [header, indented_body]
+            if hood_text:
+                block_parts.append(hood_text)
+            block_text = "\n".join(block_parts)
+
+        # Final check if block_text fits in remaining_total
+        if len(block_text) > remaining_total:
+            block_text = block_text[:remaining_total]
+
+        if not block_text:
             break
 
         output_blocks.append(block_text)
-        current_len += len(block_text) + 2  # account for separating newlines
+        current_len += len(block_text) + sep_len
 
-    return "\n\n".join(output_blocks)
+    rendered = "\n\n".join(output_blocks)
+    shown_count = len(output_blocks)
+    if shown_count < num_rows:
+        omitted = num_rows - shown_count
+        if shown_count == 0:
+            notice = f"… [output capped at {budget} chars; all {num_rows} hit(s) omitted. Use higher --budget]"
+        else:
+            notice = f"\n… [output capped at {budget} chars; {omitted} additional hit(s) omitted. Use 'bd show <id>' or higher --budget]"
+
+        if len(rendered) + len(notice) <= budget:
+            rendered = rendered + notice
+        elif len(notice) <= budget:
+            trim_point = budget - len(notice)
+            rendered = rendered[:trim_point].rstrip() + notice
+        else:
+            rendered = notice[:budget]
+
+    return rendered[:budget]
 
 
 def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24_000) -> str:
+    if budget <= 0:
+        return ""
     con.row_factory = sqlite3.Row
     lines = [render_header(data["root"])]
 
@@ -264,5 +307,8 @@ def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24
 
     full_text = "\n".join(lines)
     if len(full_text) > budget:
-        return full_text[:budget] + f"\n… [blast output capped at {budget} chars]"
+        notice = f"\n… [blast output capped at {budget} chars]"
+        if len(notice) <= budget:
+            return full_text[:budget - len(notice)].rstrip() + notice
+        return full_text[:budget]
     return full_text

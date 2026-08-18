@@ -325,16 +325,17 @@ class TestSearch(unittest.TestCase):
         self.assertEqual(escape_like("100%_done\\path"), "100\\%\\_done\\\\path")
 
     def test_format_output_hard_budget_cap(self):
-        # Multiple matching rows with a small total budget should cap and report omitted
+        # Multiple matching rows with various budgets should strictly never exceed budget
         rows = search(self.con, "", {}, limit=10)
-        out = format_output(self.con, rows, budget=400)
-        self.assertLessEqual(len(out), 600)
-        self.assertIn("output capped at 400 chars", out)
+        for budget in (50, 100, 400, 500, 1000, 24000):
+            out = format_output(self.con, rows, budget=budget)
+            self.assertLessEqual(len(out), budget, f"format_output exceeded budget {budget}: length was {len(out)}")
 
     def test_format_blast_budget_cap(self):
         data = blast_data(self.con, "task-1")
-        out = format_blast(self.con, data, budget=50)
-        self.assertIn("blast output capped at 50 chars", out)
+        for budget in (50, 100, 500, 24000):
+            out = format_blast(self.con, data, budget=budget)
+            self.assertLessEqual(len(out), budget, f"format_blast exceeded budget {budget}: length was {len(out)}")
 
 
 if __name__ == "__main__":

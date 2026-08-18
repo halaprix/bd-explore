@@ -102,6 +102,22 @@ class TestMcpServer(unittest.TestCase):
         self.assertIn("tools", init_resp["result"]["capabilities"])
         self.assertIn("instructions", init_resp["result"])
 
+    def test_initialize_protocol_version_echo(self):
+        server = McpServer(default_store=self.store_file)
+        # Echo supported version
+        resp_known = self.run_rpc(
+            server,
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-10-07"}},
+        )
+        self.assertEqual(resp_known["result"]["protocolVersion"], "2024-10-07")
+
+        # Fallback for unknown version
+        resp_unknown = self.run_rpc(
+            server,
+            {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {"protocolVersion": "9999-99-99"}},
+        )
+        self.assertEqual(resp_unknown["result"]["protocolVersion"], "2024-11-05")
+
     def test_notifications_initialized(self):
         server = McpServer(default_store=self.store_file)
         resp = self.run_rpc(

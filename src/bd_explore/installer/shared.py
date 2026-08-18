@@ -46,7 +46,7 @@ def read_json_file(file_path: Path) -> dict[str, Any]:
             return data
     except Exception as e:
         try:
-            backup_path = file_path.with_suffix(".backup")
+            backup_path = file_path.with_name(f"{file_path.name}.backup")
             shutil.copyfile(file_path, backup_path)
         except OSError:
             pass

@@ -32,35 +32,39 @@ def get_memory_content() -> str:
     return MEMORY_BODY
 
 
-def inject_beads_memory() -> dict[str, Any]:
+def inject_beads_memory(cwd: Any = None) -> dict[str, Any]:
     """Inject bd-explore guidance into beads memory using bd remember."""
     if not is_bd_available():
-        return {"status": "skipped", "reason": "bd CLI not found on PATH"}
+        return {"status": "skipped", "reason": "bd CLI not found on PATH", "message": "bd CLI not found on PATH"}
     try:
         res = subprocess.run(
             ["bd", "remember", MEMORY_BODY, "--key", MEMORY_KEY],
             capture_output=True,
             text=True,
             timeout=15,
+            cwd=cwd,
         )
         if res.returncode == 0:
-            return {"status": "injected", "key": MEMORY_KEY}
-        return {"status": "error", "message": res.stderr.strip()}
+            return {"status": "injected", "key": MEMORY_KEY, "message": "injected"}
+        return {"status": "error", "message": res.stderr.strip() or "failed to execute bd remember"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
-def remove_beads_memory() -> dict[str, Any]:
+def remove_beads_memory(cwd: Any = None) -> dict[str, Any]:
     """Remove bd-explore guidance from beads memory using bd forget."""
     if not is_bd_available():
-        return {"status": "skipped", "reason": "bd CLI not found on PATH"}
+        return {"status": "skipped", "reason": "bd CLI not found on PATH", "message": "bd CLI not found on PATH"}
     try:
         res = subprocess.run(
             ["bd", "forget", MEMORY_KEY],
             capture_output=True,
             text=True,
             timeout=15,
+            cwd=cwd,
         )
-        return {"status": "removed" if res.returncode == 0 else "not-found"}
+        if res.returncode == 0:
+            return {"status": "removed", "message": "removed"}
+        return {"status": "not-found", "message": res.stderr.strip() or "memory key not found"}
     except Exception as e:
         return {"status": "error", "message": str(e)}

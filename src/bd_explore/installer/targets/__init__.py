@@ -108,7 +108,7 @@ def run_installer(
         except Exception as e:
             results.append({"target": t_name, "status": "error", "message": str(e), "files": []})
 
-    mem_res = inject_beads_memory()
+    mem_res = inject_beads_memory(cwd=project_dir)
 
     return {
         "status": "ok",
@@ -136,7 +136,7 @@ def run_uninstaller(
         except Exception as e:
             results.append({"target": t_name, "status": "error", "message": str(e), "files": []})
 
-    mem_res = remove_beads_memory()
+    mem_res = remove_beads_memory(cwd=project_dir)
 
     return {
         "status": "ok",

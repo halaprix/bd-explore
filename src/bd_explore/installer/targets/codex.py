@@ -35,7 +35,6 @@ class CodexTarget:
         return (
             (self.home_dir / ".codex").exists()
             or (self.project_dir / ".codex").exists()
-            or (self.project_dir / "AGENTS.md").exists()
         )
 
     def get_mcp_config(self) -> str:
@@ -76,7 +75,7 @@ class CodexTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
@@ -113,4 +112,4 @@ class CodexTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}

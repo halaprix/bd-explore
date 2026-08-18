@@ -140,13 +140,14 @@ def _handle_install(args: argparse.Namespace) -> int:
         elif status == "skipped":
             print(f"  - {t_name}: skipped ({r.get('message', '')})")
         else:
-            print(f"  ✗ {t_name}: error ({r.get('message', '')})")
+            err_msg = r.get("message") or r.get("error") or "failed"
+            print(f"  ✗ {t_name}: error ({err_msg})")
 
     mem = res.get("memory")
     if mem:
         mem_status = mem.get("status")
         if mem_status == "injected":
-            print(f"  ✓ beads memory: injected ({mem.get('command', '')})")
+            print("  ✓ beads memory: injected")
         elif mem_status == "skipped":
             print(f"  - beads memory: skipped ({mem.get('message', '')})")
         else:
@@ -187,7 +188,8 @@ def _handle_uninstall(args: argparse.Namespace) -> int:
             files_str = f" -> {', '.join(file_paths)}" if file_paths else ""
             print(f"  ✓ {t_name}: uninstalled{files_str}")
         else:
-            print(f"  ✗ {t_name}: error ({r.get('message', '')})")
+            err_msg = r.get("message") or r.get("error") or "failed"
+            print(f"  ✗ {t_name}: error ({err_msg})")
 
     mem = res.get("memory")
     if mem:
@@ -196,6 +198,8 @@ def _handle_uninstall(args: argparse.Namespace) -> int:
             print("  ✓ beads memory: removed")
         elif mem_status == "skipped":
             print(f"  - beads memory: skipped ({mem.get('message', '')})")
+        elif mem_status == "not-found":
+            print(f"  - beads memory: not found ({mem.get('message', '')})")
         else:
             print(f"  ✗ beads memory: {mem.get('message', '')}")
 
@@ -284,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
             sub_args = sub_parser.parse_args(sub_argv)
 
             # Track if --location was explicitly set
-            if "-l" in sub_argv or "--location" in sub_argv:
+            if "-l" in sub_argv or any(a == "--location" or a.startswith("--location=") for a in sub_argv):
                 setattr(sub_args, "location_explicit", True)
 
             if cmd_name == "serve":

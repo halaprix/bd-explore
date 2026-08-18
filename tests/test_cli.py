@@ -468,6 +468,44 @@ class TestCli(unittest.TestCase):
             self.assertEqual(cm.exception.code, 0)
             mock_main.assert_called_once()
 
+    def test_install_subcommand_target_error_surfaces_message(self):
+        from bd_explore.cli import main
+
+        with patch("bd_explore.cli.run_installer") as mock_installer:
+            mock_installer.return_value = {
+                "status": "ok",
+                "location": "global",
+                "targets": [{"target": "claude", "status": "error", "message": "Could not parse JSON in /mock/.claude.json", "files": []}],
+                "memory": {"status": "skipped"},
+            }
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = main(["install", "--yes", "-t", "claude"])
+            self.assertEqual(code, 1)
+            out = buf.getvalue()
+            self.assertIn("error (Could not parse JSON in /mock/.claude.json)", out)
+
+    def test_install_location_equals_syntax(self):
+        from bd_explore.cli import main
+
+        with patch("bd_explore.cli.run_installer") as mock_installer:
+            mock_installer.return_value = {
+                "status": "ok",
+                "location": "project",
+                "targets": [{"target": "agents_md", "status": "ok", "files": [{"path": "/proj/AGENTS.md", "action": "created"}]}],
+                "memory": {"status": "skipped"},
+            }
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                code = main(["install", "--location=project", "--yes", "-t", "agents_md"])
+            self.assertEqual(code, 0)
+            mock_installer.assert_called_once_with(
+                targets=["agents_md"],
+                location="project",
+                auto_allow=False,
+                yes=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

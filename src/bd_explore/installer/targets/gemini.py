@@ -69,7 +69,7 @@ class GeminiTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
@@ -99,4 +99,4 @@ class GeminiTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}

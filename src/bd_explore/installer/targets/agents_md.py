@@ -36,14 +36,20 @@ class AgentsMdTarget:
 
     def install(self, location: str = "global", auto_allow: bool = False) -> dict[str, Any]:
         is_global = location == "global"
-        target_path = self.home_dir / ".config" / "AGENTS.md" if is_global else self.project_dir / "AGENTS.md"
-        res = upsert_instructions_entry(target_path)
-        return {"target": self.name, "files": [res], "status": "ok"}
+        try:
+            target_path = self.home_dir / ".config" / "AGENTS.md" if is_global else self.project_dir / "AGENTS.md"
+            res = upsert_instructions_entry(target_path)
+            return {"target": self.name, "files": [res], "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": [], "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         is_global = location == "global"
-        target_path = self.home_dir / ".config" / "AGENTS.md" if is_global else self.project_dir / "AGENTS.md"
-        if target_path.exists():
-            act = remove_marked_section(target_path, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
-            return {"target": self.name, "files": [{"path": str(target_path), "action": act}], "status": "ok"}
-        return {"target": self.name, "files": [], "status": "ok"}
+        try:
+            target_path = self.home_dir / ".config" / "AGENTS.md" if is_global else self.project_dir / "AGENTS.md"
+            if target_path.exists():
+                act = remove_marked_section(target_path, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
+                return {"target": self.name, "files": [{"path": str(target_path), "action": act}], "status": "ok"}
+            return {"target": self.name, "files": [], "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": [], "status": "error", "message": str(e), "error": str(e)}

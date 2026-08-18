@@ -24,7 +24,7 @@ class AntigravityTarget:
             (self.home_dir / ".gemini" / "config").exists()
             or (self.home_dir / ".gemini" / "antigravity").exists()
             or (self.home_dir / ".gemini" / "antigravity-cli").exists()
-            or (self.project_dir / ".gemini").exists()
+            or (self.project_dir / ".gemini" / "config").exists()
         )
 
     def get_mcp_config(self) -> dict[str, Any]:
@@ -52,9 +52,6 @@ class AntigravityTarget:
             cfg = read_json_file(config_path)
             servers = cfg.setdefault("mcpServers", {})
             servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
-            # Ensure no type: stdio in Antigravity config
-            if "type" in servers["bd-explore"]:
-                del servers["bd-explore"]["type"]
             write_json_file(config_path, cfg)
             files.append({"path": str(config_path), "action": "updated"})
 
@@ -70,7 +67,7 @@ class AntigravityTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
@@ -100,4 +97,4 @@ class AntigravityTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}

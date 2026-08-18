@@ -18,7 +18,7 @@ __all__ = ["ClaudeTarget"]
 
 class ClaudeTarget:
     name = "claude"
-    display_name = "Anthropic Claude (Desktop & Code)"
+    display_name = "Anthropic Claude Code"
 
     def __init__(self, home_dir: Path | None = None, project_dir: Path | None = None) -> None:
         self.home_dir = home_dir or Path.home()
@@ -65,11 +65,8 @@ class ClaudeTarget:
                 sett = read_json_file(settings_path)
                 perms = sett.setdefault("permissions", {})
                 allow = perms.setdefault("allow", [])
-                if "mcp__bd-explore__*" not in allow:
-                    allow.append("mcp__bd-explore__*")
-                auto = sett.setdefault("autoApprove", [])
-                if "mcp__bd-explore__*" not in auto:
-                    auto.append("mcp__bd-explore__*")
+                if "mcp__bd-explore" not in allow:
+                    allow.append("mcp__bd-explore")
                 write_json_file(settings_path, sett)
                 files.append({"path": str(settings_path), "action": "updated"})
 
@@ -84,7 +81,7 @@ class ClaudeTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
@@ -108,12 +105,10 @@ class ClaudeTarget:
                 sett = read_json_file(settings_path)
                 changed = False
                 if "permissions" in sett and "allow" in sett["permissions"]:
-                    if "mcp__bd-explore__*" in sett["permissions"]["allow"]:
-                        sett["permissions"]["allow"].remove("mcp__bd-explore__*")
-                        changed = True
-                if "autoApprove" in sett and "mcp__bd-explore__*" in sett["autoApprove"]:
-                    sett["autoApprove"].remove("mcp__bd-explore__*")
-                    changed = True
+                    for item in ["mcp__bd-explore", "mcp__bd-explore__*"]:
+                        if item in sett["permissions"]["allow"]:
+                            sett["permissions"]["allow"].remove(item)
+                            changed = True
                 if changed:
                     write_json_file(settings_path, sett)
                     files.append({"path": str(settings_path), "action": "updated"})
@@ -129,4 +124,4 @@ class ClaudeTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}

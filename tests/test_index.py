@@ -230,11 +230,14 @@ class TestIndex(unittest.TestCase):
         con.close()
 
     def test_build_index_error_closes_con(self):
-        # Trigger an error during index build (e.g. non-existent directory for db_path)
-        bad_store = self.store_file
-        db_path = self.root / "non_existent_dir" / "sub" / "db.db"
-        with self.assertRaises(sqlite3.OperationalError):
+        # Trigger an error during index build with missing store file
+        bad_store = self.root / "non_existent_store.jsonl"
+        db_path = self.root / "error_test.db"
+        with self.assertRaises(FileNotFoundError):
             build_index(bad_store, db_path)
+        # Verify no temp file left behind
+        tmp_files = list(self.root.glob("*.tmp.*"))
+        self.assertEqual(tmp_files, [])
 
     def test_open_index_cache_reuse(self):
         os.environ["XDG_CACHE_HOME"] = str(self.root / "cache_home")
@@ -248,10 +251,43 @@ class TestIndex(unittest.TestCase):
         self.assertEqual(meta1["mtime"], meta2["mtime"])
         con2.close()
 
-        # Force rebuild recreates
-        con3 = open_index(self.store_file, force=True)
-        self.assertIsNotNone(con3)
-        con3.close()
+    def test_deduplicate_issue_ids(self):
+        dup_store = self.root / "duplicates.jsonl"
+        with open(dup_store, "w", encoding="utf-8") as f:
+            f.write('{"id": "bd-dup", "title": "Old Version", "status": "open", "description": "old text"}\n')
+            f.write('{"id": "bd-dup", "title": "New Version", "status": "closed", "description": "new text"}\n')
+        db_path = self.root / "duplicates.db"
+        con = build_index(dup_store, db_path)
+        docs = con.execute("SELECT id, title, status FROM docs WHERE id='bd-dup'").fetchall()
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["title"], "New Version")
+        self.assertEqual(docs[0]["status"], "closed")
+
+        fts_hits = con.execute("SELECT id, title FROM docs_fts WHERE docs_fts MATCH 'Version'").fetchall()
+        self.assertEqual(len(fts_hits), 1)
+        self.assertEqual(fts_hits[0]["title"], "New Version")
+        con.close()
+
+    def test_dependency_normalization_and_empty_id(self):
+        dep_store = self.root / "dep_norm.jsonl"
+        with open(dep_store, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "id": "task-a",
+                "title": "Task A",
+                "status": "open",
+                "dependencies": [
+                    {"issue_id": "", "depends_on_id": "task-b", "type": "blocked-by"},
+                    {"issue_id": "task-a", "depends_on_id": "task-c", "type": "parent-child"},
+                ]
+            }) + "\n")
+        db_path = self.root / "dep_norm.db"
+        con = build_index(dep_store, db_path)
+        edges = con.execute("SELECT src, dst, kind FROM edges").fetchall()
+        edge_set = {(r[0], r[1], r[2]) for r in edges}
+        # blocked-by should be normalized to (task-b, task-a, 'blocks')
+        self.assertIn(("task-b", "task-a", "blocks"), edge_set)
+        self.assertIn(("task-a", "task-c", "parent-child"), edge_set)
+        con.close()
 
 
 if __name__ == "__main__":

@@ -76,6 +76,7 @@ bd-explore -n 3 --budget 16000 "database migration"
 | `id:` | `<id-or-substring>` | Match issues by ID (substring / prefix) |
 
 > Non-filter tokens (e.g. `foo:bar`) automatically fall through to free-text search.
+> **Tip**: Quote your search string when it contains spaces, filter colons, or words matching subcommands (e.g. `bd-explore "serve refactor"`).
 
 ---
 

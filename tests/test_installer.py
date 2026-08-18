@@ -207,6 +207,7 @@ class TestInstallerMemory(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=15,
+            cwd=None,
         )
 
     @patch("bd_explore.installer.memory.is_bd_available", return_value=True)
@@ -233,6 +234,7 @@ class TestInstallerMemory(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=15,
+            cwd=None,
         )
 
 
@@ -266,11 +268,8 @@ class TestTargets(unittest.TestCase):
         settings_file = self.home / ".claude" / "settings.json"
         self.assertTrue(settings_file.exists())
         sett = read_json_file(settings_file)
-        self.assertTrue(
-            "mcp__bd-explore__*" in sett.get("permissions", {}).get("allow", [])
-            or "mcp__bd-explore__*" in sett.get("autoApprove", [])
-            or "bd-explore" in str(sett)
-        )
+        self.assertIn("mcp__bd-explore", sett.get("permissions", {}).get("allow", []))
+        self.assertNotIn("autoApprove", sett)
 
         # Local install
         res_local = target.install(location="local", auto_allow=False)

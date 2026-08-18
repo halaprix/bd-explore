@@ -60,11 +60,13 @@ SERVER_INSTRUCTIONS = (
 )
 
 
-def _safe_int(val: Any, default: int) -> int:
+def _safe_int(val: Any, default: int, min_val: int = 1) -> int:
     """Defensive integer conversion helper for query limits and budgets."""
+    if val is None or isinstance(val, bool):
+        return default
     try:
         parsed = int(val)
-        return parsed if parsed > 0 else default
+        return max(parsed, min_val) if parsed > 0 else default
     except (ValueError, TypeError):
         return default
 
@@ -79,11 +81,14 @@ class McpServer:
         params = req.get("params") or {}
 
         if method == "initialize":
+            req_version = str(params.get("protocolVersion") or "")
+            supported = {"2024-11-05", "2024-10-07", "0.1.0"}
+            proto_version = req_version if req_version in supported else "2024-11-05"
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": proto_version,
                     "serverInfo": {"name": "bd-explore", "version": VERSION},
                     "capabilities": {"tools": {}},
                     "instructions": SERVER_INSTRUCTIONS,
@@ -143,13 +148,14 @@ class McpServer:
             if blast_id:
                 try:
                     data = blast_data(con, blast_id)
-                    return format_blast(con, data), False
+                    budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS, min_val=100)
+                    return format_blast(con, data, budget=budget), False
                 except Exception as e:
                     return f"bd-explore blast error: {e}", True
 
             query_str = args.get("query") or ""
-            limit = _safe_int(args.get("limit"), DEFAULT_SEEDS)
-            budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS)
+            limit = _safe_int(args.get("limit"), DEFAULT_SEEDS, min_val=1)
+            budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS, min_val=100)
 
             text, filters = parse_query(query_str)
             rows = search(con, text, filters, limit)

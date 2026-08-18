@@ -37,9 +37,7 @@ class CursorTarget:
         """Check if Cursor configurations exist."""
         return (
             (self.home_dir / ".cursor").exists()
-            or (self.home_dir / ".cursor" / "mcp.json").exists()
             or (self.project_dir / ".cursor").exists()
-            or (self.project_dir / ".cursorrules").exists()
         )
 
     def get_mcp_config(self) -> dict[str, Any]:
@@ -76,7 +74,7 @@ class CursorTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
@@ -110,4 +108,4 @@ class CursorTarget:
 
             return {"target": self.name, "files": files, "status": "ok"}
         except Exception as e:
-            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
+            return {"target": self.name, "files": files, "status": "error", "message": str(e), "error": str(e)}
