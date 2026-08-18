@@ -48,71 +48,85 @@ class ClaudeTarget:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        config_path = self.home_dir / ".claude.json" if is_global else self.project_dir / ".mcp.json"
-        cfg = read_json_file(config_path)
-        servers = cfg.setdefault("mcpServers", {})
-        servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
-        write_json_file(config_path, cfg)
-        files.append({"path": str(config_path), "action": "updated"})
+        try:
+            config_path = self.home_dir / ".claude.json" if is_global else self.project_dir / ".mcp.json"
+            cfg = read_json_file(config_path)
+            servers = cfg.setdefault("mcpServers", {})
+            servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
+            write_json_file(config_path, cfg)
+            files.append({"path": str(config_path), "action": "updated"})
 
-        if auto_allow or is_global:
-            settings_path = (
-                self.home_dir / ".claude" / "settings.json"
+            if auto_allow:
+                settings_path = (
+                    self.home_dir / ".claude" / "settings.json"
+                    if is_global
+                    else self.project_dir / ".claude" / "settings.json"
+                )
+                sett = read_json_file(settings_path)
+                perms = sett.setdefault("permissions", {})
+                allow = perms.setdefault("allow", [])
+                if "mcp__bd-explore__*" not in allow:
+                    allow.append("mcp__bd-explore__*")
+                auto = sett.setdefault("autoApprove", [])
+                if "mcp__bd-explore__*" not in auto:
+                    auto.append("mcp__bd-explore__*")
+                write_json_file(settings_path, sett)
+                files.append({"path": str(settings_path), "action": "updated"})
+
+            # Instructions in CLAUDE.md
+            claude_md = (
+                self.home_dir / ".claude" / "CLAUDE.md"
                 if is_global
-                else self.project_dir / ".claude" / "settings.json"
+                else self.project_dir / "CLAUDE.md"
             )
-            sett = read_json_file(settings_path)
-            perms = sett.setdefault("permissions", {})
-            allow = perms.setdefault("allow", [])
-            if "mcp__bd-explore__*" not in allow:
-                allow.append("mcp__bd-explore__*")
-            auto = sett.setdefault("autoApprove", [])
-            if "mcp__bd-explore__*" not in auto:
-                auto.append("mcp__bd-explore__*")
-            write_json_file(settings_path, sett)
-            files.append({"path": str(settings_path), "action": "updated"})
+            res = upsert_instructions_entry(claude_md)
+            files.append(res)
 
-        # Instructions in CLAUDE.md
-        claude_md = self.project_dir / "CLAUDE.md"
-        res = upsert_instructions_entry(claude_md)
-        files.append(res)
-
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        config_path = self.home_dir / ".claude.json" if is_global else self.project_dir / ".mcp.json"
-        if config_path.exists():
-            cfg = read_json_file(config_path)
-            if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
-                del cfg["mcpServers"]["bd-explore"]
-                write_json_file(config_path, cfg)
-                files.append({"path": str(config_path), "action": "updated"})
+        try:
+            config_path = self.home_dir / ".claude.json" if is_global else self.project_dir / ".mcp.json"
+            if config_path.exists():
+                cfg = read_json_file(config_path)
+                if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
+                    del cfg["mcpServers"]["bd-explore"]
+                    write_json_file(config_path, cfg)
+                    files.append({"path": str(config_path), "action": "updated"})
 
-        settings_path = (
-            self.home_dir / ".claude" / "settings.json"
-            if is_global
-            else self.project_dir / ".claude" / "settings.json"
-        )
-        if settings_path.exists():
-            sett = read_json_file(settings_path)
-            changed = False
-            if "permissions" in sett and "allow" in sett["permissions"]:
-                if "mcp__bd-explore__*" in sett["permissions"]["allow"]:
-                    sett["permissions"]["allow"].remove("mcp__bd-explore__*")
+            settings_path = (
+                self.home_dir / ".claude" / "settings.json"
+                if is_global
+                else self.project_dir / ".claude" / "settings.json"
+            )
+            if settings_path.exists():
+                sett = read_json_file(settings_path)
+                changed = False
+                if "permissions" in sett and "allow" in sett["permissions"]:
+                    if "mcp__bd-explore__*" in sett["permissions"]["allow"]:
+                        sett["permissions"]["allow"].remove("mcp__bd-explore__*")
+                        changed = True
+                if "autoApprove" in sett and "mcp__bd-explore__*" in sett["autoApprove"]:
+                    sett["autoApprove"].remove("mcp__bd-explore__*")
                     changed = True
-            if "autoApprove" in sett and "mcp__bd-explore__*" in sett["autoApprove"]:
-                sett["autoApprove"].remove("mcp__bd-explore__*")
-                changed = True
-            if changed:
-                write_json_file(settings_path, sett)
-                files.append({"path": str(settings_path), "action": "updated"})
+                if changed:
+                    write_json_file(settings_path, sett)
+                    files.append({"path": str(settings_path), "action": "updated"})
 
-        claude_md = self.project_dir / "CLAUDE.md"
-        if claude_md.exists():
-            act = remove_marked_section(claude_md, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
-            files.append({"path": str(claude_md), "action": act})
+            claude_md = (
+                self.home_dir / ".claude" / "CLAUDE.md"
+                if is_global
+                else self.project_dir / "CLAUDE.md"
+            )
+            if claude_md.exists():
+                act = remove_marked_section(claude_md, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
+                files.append({"path": str(claude_md), "action": act})
 
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}

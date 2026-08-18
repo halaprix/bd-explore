@@ -164,40 +164,72 @@ class McpServer:
                     pass
 
     def handle_stream(self, in_stream: BinaryIO, out_stream: BinaryIO) -> None:
+        """Process messages from in_stream supporting both Content-Length headers and NDJSON."""
         try:
-            for line in in_stream:
-                line_str = line.decode("utf-8").strip()
+            while True:
+                line = in_stream.readline()
+                if not line:
+                    break
+                line_str = line.decode("utf-8", errors="replace").strip()
                 if not line_str:
                     continue
+
+                content_bytes = b""
+                is_content_length = False
+                if line_str.lower().startswith("content-length:"):
+                    is_content_length = True
+                    try:
+                        length = int(line_str.split(":", 1)[1].strip())
+                    except ValueError:
+                        length = 0
+                    # Read headers until empty line
+                    while True:
+                        hdr = in_stream.readline()
+                        if not hdr or hdr in (b"\r\n", b"\n", b""):
+                            break
+                    if length > 0:
+                        content_bytes = in_stream.read(length)
+                else:
+                    content_bytes = line.strip()
+
+                if not content_bytes:
+                    continue
+
                 try:
-                    req = json.loads(line_str)
+                    req = json.loads(content_bytes.decode("utf-8", errors="replace"))
                     if not isinstance(req, dict):
                         err_resp = {
                             "jsonrpc": "2.0",
                             "id": None,
                             "error": {"code": -32600, "message": "Invalid Request: JSON payload must be an object"},
                         }
-                        out_stream.write((json.dumps(err_resp) + "\n").encode("utf-8"))
-                        out_stream.flush()
+                        self._write_response(out_stream, err_resp, is_content_length)
                         continue
                     resp = self.handle_request(req)
                     if resp is not None:
-                        out_bytes = (json.dumps(resp) + "\n").encode("utf-8")
-                        out_stream.write(out_bytes)
-                        out_stream.flush()
+                        self._write_response(out_stream, resp, is_content_length)
                 except json.JSONDecodeError:
                     err_resp = {
                         "jsonrpc": "2.0",
                         "id": None,
                         "error": {"code": -32700, "message": "Parse error"},
                     }
-                    out_stream.write((json.dumps(err_resp) + "\n").encode("utf-8"))
-                    out_stream.flush()
+                    self._write_response(out_stream, err_resp, is_content_length)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _write_response(self, out_stream: BinaryIO, payload: dict, use_content_length: bool) -> None:
+        body = json.dumps(payload) + "\n"
+        body_bytes = body.encode("utf-8")
+        if use_content_length:
+            header = f"Content-Length: {len(body_bytes)}\r\n\r\n".encode("utf-8")
+            out_stream.write(header + body_bytes)
+        else:
+            out_stream.write(body_bytes)
+        out_stream.flush()
+
 
 def run_mcp_server(default_store: Path | str | None = None) -> None:
-    store_path = Path(default_store) if default_store else None
+    store_path = find_store(str(default_store)) if default_store else None
     server = McpServer(default_store=store_path)
     server.handle_stream(sys.stdin.buffer, sys.stdout.buffer)

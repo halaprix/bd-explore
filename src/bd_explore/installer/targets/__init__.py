@@ -83,9 +83,21 @@ def run_installer(
     project_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Execute installation across target agents and inject beads memory."""
-    target_names = targets or detect_installed_targets(home_dir=home_dir, project_dir=project_dir)
-    if not target_names:
+    if targets and "all" in [t.lower() for t in targets]:
         target_names = list(TARGET_REGISTRY.keys())
+    elif targets:
+        target_names = targets
+    else:
+        target_names = detect_installed_targets(home_dir=home_dir, project_dir=project_dir)
+
+    if not target_names:
+        return {
+            "status": "no_targets_detected",
+            "location": location,
+            "targets": [],
+            "memory": {"action": "skipped", "message": "No agent platforms detected"},
+            "message": "No supported agent platforms detected in environment. Use -t <target> (e.g. -t claude) or -t all to install.",
+        }
 
     results = []
     for t_name in target_names:

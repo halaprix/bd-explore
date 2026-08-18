@@ -73,7 +73,7 @@ bd-explore -n 3 --budget 16000 "database migration"
 | `type:` | `bug`, `feature`, `task`, `epic`, `chore` | Filter by issue type |
 | `priority:` | `0`, `1`, `2`, `3`, `4` (or `P0`..`P4`) | Filter by priority level |
 | `epic:` | `<id-or-suffix>` | Filter issues belonging to an epic |
-| `id:` | `<prefix>` | Match issues by ID prefix |
+| `id:` | `<id-or-substring>` | Match issues by ID (substring / prefix) |
 
 > Non-filter tokens (e.g. `foo:bar`) automatically fall through to free-text search.
 
@@ -96,13 +96,13 @@ Outputs:
 
 ## Stdio MCP Server
 
-`bd-explore` includes a built-in JSON-RPC 2.0 stdio MCP server for agent integration.
+`bd-explore` includes a built-in JSON-RPC 2.0 stdio MCP server for agent integration. It supports both newline-delimited JSON (NDJSON) and HTTP-style `Content-Length:` header framing.
 
 Run server directly:
 ```bash
-bd-explore serve
+bd-explore serve --mcp
 # Or with explicit store:
-bd-explore serve --store ~/Projects/my-project
+bd-explore serve --mcp --store ~/Projects/my-project
 ```
 
 ### MCP Tool: `bd_explore`

@@ -47,42 +47,56 @@ class GeminiTarget:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        settings_path = (
-            self.home_dir / ".gemini" / "settings.json"
-            if is_global
-            else self.project_dir / ".gemini" / "settings.json"
-        )
-        cfg = read_json_file(settings_path)
-        servers = cfg.setdefault("mcpServers", {})
-        servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
-        write_json_file(settings_path, cfg)
-        files.append({"path": str(settings_path), "action": "updated"})
+        try:
+            settings_path = (
+                self.home_dir / ".gemini" / "settings.json"
+                if is_global
+                else self.project_dir / ".gemini" / "settings.json"
+            )
+            cfg = read_json_file(settings_path)
+            servers = cfg.setdefault("mcpServers", {})
+            servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
+            write_json_file(settings_path, cfg)
+            files.append({"path": str(settings_path), "action": "updated"})
 
-        gemini_md = self.project_dir / "GEMINI.md"
-        res = upsert_instructions_entry(gemini_md)
-        files.append(res)
+            gemini_md = (
+                self.home_dir / ".gemini" / "GEMINI.md"
+                if is_global
+                else self.project_dir / "GEMINI.md"
+            )
+            res = upsert_instructions_entry(gemini_md)
+            files.append(res)
 
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        settings_path = (
-            self.home_dir / ".gemini" / "settings.json"
-            if is_global
-            else self.project_dir / ".gemini" / "settings.json"
-        )
-        if settings_path.exists():
-            cfg = read_json_file(settings_path)
-            if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
-                del cfg["mcpServers"]["bd-explore"]
-                write_json_file(settings_path, cfg)
-                files.append({"path": str(settings_path), "action": "updated"})
+        try:
+            settings_path = (
+                self.home_dir / ".gemini" / "settings.json"
+                if is_global
+                else self.project_dir / ".gemini" / "settings.json"
+            )
+            if settings_path.exists():
+                cfg = read_json_file(settings_path)
+                if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
+                    del cfg["mcpServers"]["bd-explore"]
+                    write_json_file(settings_path, cfg)
+                    files.append({"path": str(settings_path), "action": "updated"})
 
-        gemini_md = self.project_dir / "GEMINI.md"
-        if gemini_md.exists():
-            act = remove_marked_section(gemini_md, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
-            files.append({"path": str(gemini_md), "action": act})
+            gemini_md = (
+                self.home_dir / ".gemini" / "GEMINI.md"
+                if is_global
+                else self.project_dir / "GEMINI.md"
+            )
+            if gemini_md.exists():
+                act = remove_marked_section(gemini_md, BD_EXPLORE_SECTION_START, BD_EXPLORE_SECTION_END)
+                files.append({"path": str(gemini_md), "action": act})
 
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}

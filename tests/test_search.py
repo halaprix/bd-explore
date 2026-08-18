@@ -13,6 +13,7 @@ sys.path.insert(0, src_dir)
 from bd_explore.index import build_index
 from bd_explore.search import (
     blast_data,
+    escape_like,
     format_blast,
     format_output,
     fts_escape,
@@ -318,6 +319,22 @@ class TestSearch(unittest.TestCase):
         }
         h = render_header(doc)
         self.assertIn("═══ task-none [ · P1 · task", h)
+
+    def test_escape_like(self):
+        self.assertEqual(escape_like("simple"), "simple")
+        self.assertEqual(escape_like("100%_done\\path"), "100\\%\\_done\\\\path")
+
+    def test_format_output_hard_budget_cap(self):
+        # Multiple matching rows with a small total budget should cap and report omitted
+        rows = search(self.con, "", {}, limit=10)
+        out = format_output(self.con, rows, budget=400)
+        self.assertLessEqual(len(out), 600)
+        self.assertIn("output capped at 400 chars", out)
+
+    def test_format_blast_budget_cap(self):
+        data = blast_data(self.con, "task-1")
+        out = format_blast(self.con, data, budget=50)
+        self.assertIn("blast output capped at 50 chars", out)
 
 
 if __name__ == "__main__":

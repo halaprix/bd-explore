@@ -42,56 +42,62 @@ class AntigravityTarget:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        # Unified config
-        config_path = (
-            self.home_dir / ".gemini" / "config" / "mcp_config.json"
-            if is_global
-            else self.project_dir / ".gemini" / "config" / "mcp_config.json"
-        )
-        cfg = read_json_file(config_path)
-        servers = cfg.setdefault("mcpServers", {})
-        servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
-        # Ensure no type: stdio in Antigravity config
-        if "type" in servers["bd-explore"]:
-            del servers["bd-explore"]["type"]
-        write_json_file(config_path, cfg)
-        files.append({"path": str(config_path), "action": "updated"})
+        try:
+            # Unified config
+            config_path = (
+                self.home_dir / ".gemini" / "config" / "mcp_config.json"
+                if is_global
+                else self.project_dir / ".gemini" / "config" / "mcp_config.json"
+            )
+            cfg = read_json_file(config_path)
+            servers = cfg.setdefault("mcpServers", {})
+            servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
+            # Ensure no type: stdio in Antigravity config
+            if "type" in servers["bd-explore"]:
+                del servers["bd-explore"]["type"]
+            write_json_file(config_path, cfg)
+            files.append({"path": str(config_path), "action": "updated"})
 
-        # Legacy fallback in home if present
-        if is_global:
-            legacy_path = self.home_dir / ".gemini" / "antigravity" / "mcp_config.json"
-            if legacy_path.parent.exists() or legacy_path.exists():
-                leg_cfg = read_json_file(legacy_path)
-                leg_servers = leg_cfg.setdefault("mcpServers", {})
-                leg_servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
-                write_json_file(legacy_path, leg_cfg)
-                files.append({"path": str(legacy_path), "action": "updated"})
+            # Legacy fallback in home if present
+            if is_global:
+                legacy_path = self.home_dir / ".gemini" / "antigravity" / "mcp_config.json"
+                if legacy_path.parent.exists() or legacy_path.exists():
+                    leg_cfg = read_json_file(legacy_path)
+                    leg_servers = leg_cfg.setdefault("mcpServers", {})
+                    leg_servers["bd-explore"] = {"command": "bd-explore", "args": ["serve", "--mcp"]}
+                    write_json_file(legacy_path, leg_cfg)
+                    files.append({"path": str(legacy_path), "action": "updated"})
 
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}
 
     def uninstall(self, location: str = "global") -> dict[str, Any]:
         files: list[dict[str, str]] = []
         is_global = location == "global"
 
-        config_path = (
-            self.home_dir / ".gemini" / "config" / "mcp_config.json"
-            if is_global
-            else self.project_dir / ".gemini" / "config" / "mcp_config.json"
-        )
-        if config_path.exists():
-            cfg = read_json_file(config_path)
-            if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
-                del cfg["mcpServers"]["bd-explore"]
-                write_json_file(config_path, cfg)
-                files.append({"path": str(config_path), "action": "updated"})
+        try:
+            config_path = (
+                self.home_dir / ".gemini" / "config" / "mcp_config.json"
+                if is_global
+                else self.project_dir / ".gemini" / "config" / "mcp_config.json"
+            )
+            if config_path.exists():
+                cfg = read_json_file(config_path)
+                if "mcpServers" in cfg and "bd-explore" in cfg["mcpServers"]:
+                    del cfg["mcpServers"]["bd-explore"]
+                    write_json_file(config_path, cfg)
+                    files.append({"path": str(config_path), "action": "updated"})
 
-        if is_global:
-            legacy_path = self.home_dir / ".gemini" / "antigravity" / "mcp_config.json"
-            if legacy_path.exists():
-                leg_cfg = read_json_file(legacy_path)
-                if "mcpServers" in leg_cfg and "bd-explore" in leg_cfg["mcpServers"]:
-                    del leg_cfg["mcpServers"]["bd-explore"]
-                    write_json_file(legacy_path, leg_cfg)
-                    files.append({"path": str(legacy_path), "action": "updated"})
+            if is_global:
+                legacy_path = self.home_dir / ".gemini" / "antigravity" / "mcp_config.json"
+                if legacy_path.exists():
+                    leg_cfg = read_json_file(legacy_path)
+                    if "mcpServers" in leg_cfg and "bd-explore" in leg_cfg["mcpServers"]:
+                        del leg_cfg["mcpServers"]["bd-explore"]
+                        write_json_file(legacy_path, leg_cfg)
+                        files.append({"path": str(legacy_path), "action": "updated"})
 
-        return {"target": self.name, "files": files, "status": "ok"}
+            return {"target": self.name, "files": files, "status": "ok"}
+        except Exception as e:
+            return {"target": self.name, "files": files, "status": "error", "error": str(e)}

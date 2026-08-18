@@ -50,6 +50,11 @@ def status_rank(status: str) -> int:
     return {"in_progress": 0, "open": 1, "deferred": 2, "": 3}.get(status, 4)  # closed last
 
 
+def escape_like(val: str) -> str:
+    """Escape special characters in SQLite LIKE queries."""
+    return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search(
     con: sqlite3.Connection, text: str, filters: dict[str, list[str]], limit: int
 ) -> list[sqlite3.Row]:
@@ -73,15 +78,15 @@ def search(
             where.append(f"d.priority IN ({','.join('?' * len(priorities))})")
             params.extend(priorities)
     if filters.get("id"):
-        where.append("(" + " OR ".join("d.id LIKE ?" for _ in filters["id"]) + ")")
-        params.extend(f"%{i}%" for i in filters["id"])
+        where.append("(" + " OR ".join("d.id LIKE ? ESCAPE '\\'" for _ in filters["id"]) + ")")
+        params.extend(f"%{escape_like(i)}%" for i in filters["id"])
     if filters.get("epic"):
         clauses = []
         for e in filters["epic"]:
             clauses.append(
-                "d.id IN (SELECT src FROM edges WHERE kind='parent-child' AND dst LIKE ?)"
+                "d.id IN (SELECT src FROM edges WHERE kind='parent-child' AND dst LIKE ? ESCAPE '\\')"
             )
-            params.append(f"%{e}%")
+            params.append(f"%{escape_like(e)}%")
         where.append("(" + " OR ".join(clauses) + ")")
 
     if text.strip():
@@ -144,8 +149,8 @@ def neighborhood(con: sqlite3.Connection, bead_id: str) -> dict[str, list[tuple[
 def blast_data(con: sqlite3.Connection, bead_id: str) -> dict[str, Any]:
     con.row_factory = sqlite3.Row
     row = con.execute(
-        "SELECT * FROM docs WHERE id LIKE ? ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1",
-        (f"%{bead_id}%", bead_id),
+        "SELECT * FROM docs WHERE id LIKE ? ESCAPE '\\' ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1",
+        (f"%{escape_like(bead_id)}%", bead_id),
     ).fetchone()
     if not row:
         raise ValueError(f"bd-explore: no bead matching '{bead_id}'")
@@ -197,29 +202,53 @@ def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int)
     if not rows:
         return "no matches — try fewer terms, or status:all"
     con.row_factory = sqlite3.Row
-    parts: list[str] = []
-    per_doc = max(budget // len(rows), 1200)
-    for r in rows:
-        parts.append(render_header(r))
+    output_blocks: list[str] = []
+    current_len = 0
+    per_doc_budget = max(budget // len(rows), 300)
+
+    for idx, r in enumerate(rows):
+        remaining_budget = max(budget - current_len, 0)
+        if remaining_budget < 100:
+            omitted = len(rows) - idx
+            output_blocks.append(
+                f"\n… [output capped at {budget} chars; {omitted} additional hit(s) omitted. Use 'bd show <id>' or higher --budget]"
+            )
+            break
+
+        header = render_header(r)
         body = r["body"] or "(no body)"
-        if len(body) > per_doc:
-            body = body[:per_doc] + f"\n… [truncated — full body: bd show {r['id']}]"
-        parts.append(textwrap.indent(body, "    "))
+        doc_budget = min(per_doc_budget, remaining_budget)
+
+        if len(body) > doc_budget:
+            body = body[:doc_budget] + f"\n… [truncated — full body: bd show {r['id']}]"
+
+        block_parts = [header, textwrap.indent(body, "    ")]
+
         hood = neighborhood(con, r["id"])
         if hood:
-            parts.append("    ── neighborhood ──")
+            block_parts.append("    ── neighborhood ──")
             for label, items in sorted(hood.items()):
                 shown = items[:6]
                 extra = f" (+{len(items) - 6} more)" if len(items) > 6 else ""
-                names = ", ".join(
-                    f"{i}" + (f" — {t}" if t else "") for i, t in shown
-                )
-                parts.append(f"    {label}: {names}{extra}")
-        parts.append("")
-    return "\n".join(parts)
+                names = ", ".join(f"{i}" + (f" — {t}" if t else "") for i, t in shown)
+                block_parts.append(f"    {label}: {names}{extra}")
+
+        block_text = "\n".join(block_parts)
+        if current_len + len(block_text) > budget and output_blocks:
+            # Fit what we can or mark capped
+            omitted = len(rows) - idx
+            output_blocks.append(
+                f"\n… [output capped at {budget} chars; {omitted} additional hit(s) omitted. Use 'bd show <id>' or higher --budget]"
+            )
+            break
+
+        output_blocks.append(block_text)
+        current_len += len(block_text) + 2  # account for separating newlines
+
+    return "\n\n".join(output_blocks)
 
 
-def format_blast(con: sqlite3.Connection, data: dict[str, Any]) -> str:
+def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24_000) -> str:
     con.row_factory = sqlite3.Row
     lines = [render_header(data["root"])]
 
@@ -232,4 +261,8 @@ def format_blast(con: sqlite3.Connection, data: dict[str, Any]) -> str:
     show("this bead is blocked by (transitively)", data["blocked_by_transitively"])
     show("beads this blocks (transitively)", data["blocks_transitively"])
     show("epic ancestry", data["epic_ancestry"])
-    return "\n".join(lines)
+
+    full_text = "\n".join(lines)
+    if len(full_text) > budget:
+        return full_text[:budget] + f"\n… [blast output capped at {budget} chars]"
+    return full_text

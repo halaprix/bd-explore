@@ -274,6 +274,22 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(resp["id"], 1)
         self.assertEqual(resp["result"], {})
 
+    def test_content_length_framing(self):
+        server = McpServer(default_store=self.store_file)
+        payload = json.dumps({"jsonrpc": "2.0", "id": 10, "method": "ping"}).encode("utf-8")
+        msg = f"Content-Length: {len(payload)}\r\n\r\n".encode("utf-8") + payload
+        in_stream = io.BytesIO(msg)
+        out_stream = io.BytesIO()
+
+        server.handle_stream(in_stream, out_stream)
+        out_stream.seek(0)
+        hdr = out_stream.readline().decode("utf-8")
+        self.assertTrue(hdr.startswith("Content-Length:"))
+        blank = out_stream.readline()
+        self.assertEqual(blank, b"\r\n")
+        body = json.loads(out_stream.readline().decode("utf-8"))
+        self.assertEqual(body["id"], 10)
+        self.assertEqual(body["result"], {})
 
 
 if __name__ == "__main__":

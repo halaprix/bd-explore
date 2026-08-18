@@ -95,8 +95,8 @@ class TestInstallerShared(unittest.TestCase):
         f = self.root / "corrupt.json"
         f.write_text("{ this is not valid json }", encoding="utf-8")
 
-        res = read_json_file(f)
-        self.assertEqual(res, {})
+        with self.assertRaises(ValueError):
+            read_json_file(f)
 
         backup = f.with_suffix(".backup")
         if not backup.exists():

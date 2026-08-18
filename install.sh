@@ -35,8 +35,8 @@ if [ "$MODE" = "uninstall" ]; then
     # Remove launchers
     rm -f "$BIN_DIR/bd-explore" "$BIN_DIR/bd_explore"
 
-    # Remove install dir if present
-    if [ -d "$INSTALL_DIR" ]; then
+    # Remove install dir if present and safely verified
+    if [ "$INSTALL_DIR" != "$HOME" ] && [ "$INSTALL_DIR" != "/" ] && [ -d "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR/src/bd_explore" ]; then
         rm -rf "$INSTALL_DIR"
     fi
 
@@ -87,7 +87,7 @@ else
     if command -v git >/dev/null 2>&1; then
         TMP_CLONE="$(mktemp -d)"
         trap 'rm -rf "$TMP_CLONE"' EXIT INT TERM
-        git clone --depth 1 https://github.com/gastownhall/bd-explore.git "$TMP_CLONE"
+        git clone --depth 1 https://github.com/halaprix/bd-explore.git "$TMP_CLONE"
         rm -rf "$INSTALL_DIR/src"
         cp -R "$TMP_CLONE/src" "$INSTALL_DIR/"
         rm -rf "$TMP_CLONE"

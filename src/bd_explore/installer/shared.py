@@ -34,20 +34,23 @@ def atomic_write_file(file_path: Path, content: str) -> None:
 
 
 def read_json_file(file_path: Path) -> dict[str, Any]:
-    """Read JSON from file_path, returning empty dict if missing or corrupted (creating a backup on syntax error)."""
+    """Read JSON from file_path, returning empty dict if file does not exist.
+    If the file exists but contains invalid JSON, creates a .backup copy and raises ValueError."""
     if not file_path.exists():
         return {}
     try:
         with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected JSON object in {file_path}, found {type(data).__name__}")
+            return data
+    except Exception as e:
         try:
             backup_path = file_path.with_suffix(".backup")
             shutil.copyfile(file_path, backup_path)
         except OSError:
             pass
-        return {}
+        raise ValueError(f"Could not parse JSON in {file_path}: {e}")
 
 
 def write_json_file(file_path: Path, data: dict[str, Any]) -> None:

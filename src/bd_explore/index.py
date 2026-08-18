@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from bd_explore.constants import DEP_KINDS
+from bd_explore.constants import DEP_KINDS, SCHEMA_VERSION
 
 SCHEMA = """
 CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
@@ -31,9 +31,16 @@ def find_store(explicit: str | None = None) -> Path:
     if explicit:
         p = Path(explicit).expanduser()
         if p.is_dir():
-            p = p / "issues.jsonl" if (p / "issues.jsonl").exists() else p / ".beads" / "issues.jsonl"
+            if (p / "issues.jsonl").exists():
+                p = p / "issues.jsonl"
+            elif (p / ".beads" / "issues.jsonl").exists():
+                p = p / ".beads" / "issues.jsonl"
+            else:
+                raise FileNotFoundError(f"bd-explore: no issues.jsonl found in directory: {p}")
         if not p.exists():
             raise FileNotFoundError(f"bd-explore: store export not found: {p}")
+        if p.name != "issues.jsonl" and not p.name.endswith(".jsonl"):
+            raise ValueError(f"bd-explore: store must be an issues.jsonl file or directory: {p}")
         return p
     env = os.environ.get("BD_EXPLORE_STORE")
     if env:
@@ -113,10 +120,16 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
 
         records: list[dict] = []
         with open(store, encoding="utf-8") as f:
-            for line in f:
+            for line_no, line in enumerate(f, 1):
                 line = line.strip()
-                if line:
-                    records.append(json.loads(line))
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    if isinstance(data, dict) and data.get("id"):
+                        records.append(data)
+                except json.JSONDecodeError:
+                    continue
 
         ids = {r["id"] for r in records}
         id_alt = "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True))
@@ -135,9 +148,12 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
                 )
             )
             for d in r.get("dependencies") or []:
-                kind = d.get("type", "related")
-                if kind in DEP_KINDS:
-                    edges.add((d.get("issue_id", r["id"]), d.get("depends_on_id", ""), kind))
+                if not isinstance(d, dict):
+                    continue
+                kind = d.get("type") or "related"
+                depends_on = d.get("depends_on_id")
+                if depends_on:
+                    edges.add((d.get("issue_id", r["id"]), depends_on, kind))
             searchable = f"{r.get('title', '')}\n{body}"
             if mention_re:
                 for m in set(mention_re.findall(searchable)):
@@ -164,7 +180,11 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
         st = store.stat()
         con.executemany(
             "INSERT INTO meta VALUES (?,?)",
-            [("mtime", str(st.st_mtime_ns)), ("size", str(st.st_size))],
+            [
+                ("mtime", str(st.st_mtime_ns)),
+                ("size", str(st.st_size)),
+                ("schema_version", SCHEMA_VERSION),
+            ],
         )
         con.commit()
         return con
@@ -182,7 +202,11 @@ def open_index(store: Path, force: bool = False) -> sqlite3.Connection:
             con.row_factory = sqlite3.Row
             meta = dict(con.execute("SELECT k, v FROM meta"))
             st = store.stat()
-            if meta.get("mtime") == str(st.st_mtime_ns) and meta.get("size") == str(st.st_size):
+            if (
+                meta.get("mtime") == str(st.st_mtime_ns)
+                and meta.get("size") == str(st.st_size)
+                and meta.get("schema_version") == SCHEMA_VERSION
+            ):
                 return con
             con.close()
         except sqlite3.DatabaseError:

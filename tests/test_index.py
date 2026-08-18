@@ -98,6 +98,12 @@ class TestIndex(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             find_store(str(self.root / "nonexistent"))
 
+    def test_find_store_rejects_non_beads_file(self):
+        random_file = self.root / "random.txt"
+        random_file.write_text("not a store", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            find_store(str(random_file))
+
     def test_find_store_env(self):
         with patch.dict(os.environ, {"BD_EXPLORE_STORE": str(self.store_file)}):
             found = find_store()
@@ -210,12 +216,24 @@ class TestIndex(unittest.TestCase):
 
         con.close()
 
-    def test_build_index_error_closes_con(self):
-        bad_store = self.root / "corrupt.jsonl"
-        with open(bad_store, "w") as f:
+    def test_build_index_skips_invalid_json_lines(self):
+        corrupt_store = self.root / "corrupt_lines.jsonl"
+        with open(corrupt_store, "w", encoding="utf-8") as f:
             f.write("NOT VALID JSON\n")
-        db_path = self.root / "corrupt.db"
-        with self.assertRaises(json.JSONDecodeError):
+            f.write('{"title": "Missing ID"}\n')
+            f.write('{"id": "valid-1", "title": "Valid Issue", "status": "open"}\n')
+        db_path = self.root / "corrupt_lines.db"
+        con = build_index(corrupt_store, db_path)
+        docs = con.execute("SELECT id, title FROM docs").fetchall()
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["id"], "valid-1")
+        con.close()
+
+    def test_build_index_error_closes_con(self):
+        # Trigger an error during index build (e.g. non-existent directory for db_path)
+        bad_store = self.store_file
+        db_path = self.root / "non_existent_dir" / "sub" / "db.db"
+        with self.assertRaises(sqlite3.OperationalError):
             build_index(bad_store, db_path)
 
     def test_open_index_cache_reuse(self):
