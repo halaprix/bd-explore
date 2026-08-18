@@ -1,0 +1,224 @@
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+src_dir = str(Path(__file__).resolve().parents[1] / "src")
+while src_dir in sys.path:
+    sys.path.remove(src_dir)
+sys.path.insert(0, src_dir)
+
+from bd_explore.index import (
+    build_index,
+    cache_db_path,
+    compose_body,
+    find_store,
+    load_memories,
+    open_index,
+)
+
+
+class TestIndex(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.beads_dir = self.root / ".beads"
+        self.beads_dir.mkdir(parents=True)
+        self.store_file = self.beads_dir / "issues.jsonl"
+
+        # Mock issues with description, notes, comments, close reason, dependencies, and mentions
+        self.sample_issues = [
+            {
+                "id": "bd-100",
+                "title": "Epic Root Issue",
+                "status": "in_progress",
+                "issue_type": "epic",
+                "priority": 1,
+                "created_at": "2026-08-01T10:00:00Z",
+                "updated_at": "2026-08-10T12:00:00Z",
+                "closed_at": None,
+                "description": "Top level epic for auth migration",
+                "dependencies": [],
+            },
+            {
+                "id": "bd-101",
+                "title": "Implement JWT validation",
+                "status": "closed",
+                "issue_type": "task",
+                "priority": 2,
+                "created_at": "2026-08-02T10:00:00Z",
+                "updated_at": "2026-08-05T12:00:00Z",
+                "closed_at": "2026-08-05T12:00:00Z",
+                "description": "Validate claims and tokens. See bd-100. GH #42",
+                "design": "Use RSA256 signature verification",
+                "acceptance_criteria": "Pass all crypto test vectors",
+                "notes": "Handoff: bd-102 depends on this token format.",
+                "comments": [{"author": "alice", "created_at": "2026-08-03T11:00:00Z", "text": "Tested on staging"}],
+                "close_reason": "Merged in PR #43",
+                "dependencies": [
+                    {"issue_id": "bd-101", "depends_on_id": "bd-100", "type": "parent-child"}
+                ],
+            },
+            {
+                "id": "bd-102",
+                "title": "Token refresh endpoint",
+                "status": "open",
+                "issue_type": "task",
+                "priority": 1,
+                "created_at": "2026-08-03T10:00:00Z",
+                "updated_at": "2026-08-08T12:00:00Z",
+                "closed_at": None,
+                "description": "Handle refresh rotation. Blocked by bd-101.",
+                "dependencies": [
+                    {"issue_id": "bd-102", "depends_on_id": "bd-101", "type": "blocks"}
+                ],
+            },
+        ]
+        with open(self.store_file, "w", encoding="utf-8") as f:
+            for issue in self.sample_issues:
+                f.write(json.dumps(issue) + "\n")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_find_store_explicit_file(self):
+        found = find_store(str(self.store_file))
+        self.assertEqual(found.resolve(), self.store_file.resolve())
+
+    def test_find_store_explicit_dir(self):
+        found = find_store(str(self.root))
+        self.assertEqual(found.resolve(), self.store_file.resolve())
+
+    def test_find_store_explicit_missing(self):
+        with self.assertRaises(FileNotFoundError):
+            find_store(str(self.root / "nonexistent"))
+
+    def test_find_store_env(self):
+        with patch.dict(os.environ, {"BD_EXPLORE_STORE": str(self.store_file)}):
+            found = find_store()
+            self.assertEqual(found.resolve(), self.store_file.resolve())
+
+    def test_find_store_from_cwd(self):
+        orig_cwd = os.getcwd()
+        nested = self.root / "sub" / "deep"
+        nested.mkdir(parents=True)
+        try:
+            os.chdir(nested)
+            with patch.dict(os.environ, {}, clear=True):
+                # Ensure BD_EXPLORE_STORE is not set
+                if "BD_EXPLORE_STORE" in os.environ:
+                    del os.environ["BD_EXPLORE_STORE"]
+                found = find_store()
+                self.assertEqual(found.resolve(), self.store_file.resolve())
+        finally:
+            os.chdir(orig_cwd)
+
+    def test_find_store_not_found(self):
+        empty_temp = tempfile.TemporaryDirectory()
+        orig_cwd = os.getcwd()
+        try:
+            os.chdir(empty_temp.name)
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(FileNotFoundError):
+                    find_store()
+        finally:
+            os.chdir(orig_cwd)
+            empty_temp.cleanup()
+
+    def test_compose_body(self):
+        body = compose_body(self.sample_issues[1])
+        self.assertIn("Validate claims and tokens", body)
+        self.assertIn("DESIGN:\nUse RSA256", body)
+        self.assertIn("ACCEPTANCE:\nPass all crypto", body)
+        self.assertIn("NOTES:\nHandoff: bd-102", body)
+        self.assertIn("COMMENT (alice 2026-08-03):\nTested on staging", body)
+        self.assertIn("CLOSE REASON:\nMerged in PR #43", body)
+
+    def test_compose_body_empty(self):
+        body = compose_body({"id": "bd-999"})
+        self.assertEqual(body, "")
+
+    def test_cache_db_path(self):
+        os.environ["XDG_CACHE_HOME"] = str(self.root / "cache_home")
+        p1 = cache_db_path(self.store_file)
+        p2 = cache_db_path(self.store_file)
+        self.assertEqual(p1, p2)
+        self.assertTrue(str(p1).endswith(".db"))
+        self.assertTrue(p1.parent.exists())
+
+    def test_load_memories_cli_unavailable(self):
+        with patch("subprocess.run", side_effect=FileNotFoundError("bd not found")):
+            mems = load_memories()
+            self.assertEqual(mems, [])
+
+    def test_load_memories_dict_output(self):
+        mock_res = MagicMock(returncode=0, stdout=json.dumps({"arch_decision": "Use SQLite FTS5"}))
+        with patch("subprocess.run", return_value=mock_res):
+            mems = load_memories()
+            self.assertEqual(len(mems), 1)
+            self.assertEqual(mems[0]["key"], "arch_decision")
+            self.assertEqual(mems[0]["content"], "Use SQLite FTS5")
+
+    def test_load_memories_list_output(self):
+        mock_res = MagicMock(returncode=0, stdout=json.dumps([{"key": "rule1", "content": "Keep zero deps"}]))
+        with patch("subprocess.run", return_value=mock_res):
+            mems = load_memories()
+            self.assertEqual(len(mems), 1)
+            self.assertEqual(mems[0]["key"], "rule1")
+            self.assertEqual(mems[0]["content"], "Keep zero deps")
+
+    def test_build_and_query_index(self):
+        db_path = self.root / "cache.db"
+        con = build_index(self.store_file, db_path)
+
+        # Check docs table
+        doc_count = con.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
+        self.assertEqual(doc_count, 3)
+
+        # Check mention edges: bd-101 cited bd-100 and bd-102
+        mentions = con.execute("SELECT src, dst, kind FROM edges WHERE kind='mentions'").fetchall()
+        mention_pairs = [(m[0], m[1]) for m in mentions]
+        self.assertIn(("bd-101", "bd-100"), mention_pairs)
+        self.assertIn(("bd-101", "bd-102"), mention_pairs)
+
+        # Check GH ref edges
+        gh_refs = con.execute("SELECT src, dst, kind FROM edges WHERE kind='gh-ref'").fetchall()
+        self.assertIn(("bd-101", "#42", "gh-ref"), gh_refs)
+        self.assertIn(("bd-101", "#43", "gh-ref"), gh_refs)
+
+        # Check dependency edges
+        dep_edges = con.execute("SELECT src, dst, kind FROM edges WHERE kind='parent-child'").fetchall()
+        self.assertEqual(dep_edges, [("bd-101", "bd-100", "parent-child")])
+
+        # Check FTS index populated
+        fts_hits = con.execute("SELECT id FROM docs_fts WHERE docs_fts MATCH 'RSA256'").fetchall()
+        self.assertEqual(len(fts_hits), 1)
+        self.assertEqual(fts_hits[0][0], "bd-101")
+
+        con.close()
+
+    def test_open_index_cache_reuse(self):
+        os.environ["XDG_CACHE_HOME"] = str(self.root / "cache_home")
+        con1 = open_index(self.store_file)
+        meta1 = dict(con1.execute("SELECT k, v FROM meta"))
+        con1.close()
+
+        # Opening again without modifications reuses DB
+        con2 = open_index(self.store_file)
+        meta2 = dict(con2.execute("SELECT k, v FROM meta"))
+        self.assertEqual(meta1["mtime"], meta2["mtime"])
+        con2.close()
+
+        # Force rebuild recreates
+        con3 = open_index(self.store_file, force=True)
+        self.assertIsNotNone(con3)
+        con3.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
