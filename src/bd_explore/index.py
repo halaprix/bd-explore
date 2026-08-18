@@ -161,6 +161,8 @@ def build_index(store: Path, db_path: Path) -> sqlite3.Connection:
                 src_id = d.get("issue_id") or r["id"]
                 dst_id = d.get("depends_on_id")
                 kind = d.get("type") or "related"
+                if kind not in DEP_KINDS:
+                    kind = "related"
                 if not dst_id or not src_id:
                     continue
                 if kind == "blocked-by":
