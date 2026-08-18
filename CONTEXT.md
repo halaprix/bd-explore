@@ -7,6 +7,12 @@
   lifetime, limit/budget defaulting and clamping, and canonical error text. `cli.py` and
   `mcp.py` are thin adapters at this seam: they parse arguments / frame JSON-RPC and present
   the Explorer's strings.
+- **Hydrate** — the batched fetch step (`hydrate`, `hydrate_blast` in `search.py`): attaches
+  everything rendering needs (neighborhood edges, endpoint titles, blast labels) to plain
+  records in at most two queries, so no connection crosses the render seam.
+- **Render** — the pure formatting step (`render`, `render_blast` in `search.py`): hydrated
+  records plus a budget in, formatted text out. All budget/truncation logic lives here.
+  `format_output`/`format_blast` are thin hydrate-then-render wrappers.
 - **Bead** — one issue record in the beads store (`.beads/issues.jsonl`).
 - **Store** — the resolved `issues.jsonl` export a query runs against (explicit path, `BD_EXPLORE_STORE`, or discovered by walking up from cwd).
 - **Blast radius** — the transitive dependency closure of one bead: blocked-by/blocks chains plus epic ancestry.

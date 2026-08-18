@@ -16,10 +16,35 @@ __all__ = [
     "search",
     "neighborhood",
     "blast_data",
+    "hydrate",
+    "hydrate_blast",
+    "render",
+    "render_blast",
     "render_header",
     "format_output",
     "format_blast",
 ]
+
+_EDGE_LABELS = {
+    ("parent-child", "out"): "child of",
+    ("parent-child", "in"): "children",
+    ("blocks", "out"): "blocked by",
+    ("blocks", "in"): "blocks",
+    ("blocked-by", "out"): "blocks",
+    ("blocked-by", "in"): "blocked by",
+    ("discovered-from", "out"): "discovered from",
+    ("discovered-from", "in"): "discoveries from this",
+    ("supersedes", "out"): "supersedes",
+    ("supersedes", "in"): "superseded by",
+    ("mentions", "out"): "mentions",
+    ("mentions", "in"): "mentioned by",
+    ("gh-ref", "out"): "github refs",
+    ("gh-ref", "in"): "github refs",
+    ("related", "out"): "related",
+    ("related", "in"): "related",
+    ("relates-to", "out"): "related",
+    ("relates-to", "in"): "related",
+}
 
 
 def parse_query(raw: str) -> tuple[str, dict[str, list[str]]]:
@@ -116,26 +141,7 @@ def neighborhood(con: sqlite3.Connection, bead_id: str) -> dict[str, list[tuple[
         row = con.execute("SELECT title, status FROM docs WHERE id=?", (i,)).fetchone()
         return f"{row['title']} [{row['status']}]" if row else "(external)"
 
-    labels = {
-        ("parent-child", "out"): "child of",
-        ("parent-child", "in"): "children",
-        ("blocks", "out"): "blocked by",
-        ("blocks", "in"): "blocks",
-        ("blocked-by", "out"): "blocks",
-        ("blocked-by", "in"): "blocked by",
-        ("discovered-from", "out"): "discovered from",
-        ("discovered-from", "in"): "discoveries from this",
-        ("supersedes", "out"): "supersedes",
-        ("supersedes", "in"): "superseded by",
-        ("mentions", "out"): "mentions",
-        ("mentions", "in"): "mentioned by",
-        ("gh-ref", "out"): "github refs",
-        ("gh-ref", "in"): "github refs",
-        ("related", "out"): "related",
-        ("related", "in"): "related",
-        ("relates-to", "out"): "related",
-        ("relates-to", "in"): "related",
-    }
+    labels = _EDGE_LABELS
     for src, dst, kind in con.execute(
         "SELECT src, dst, kind FROM edges WHERE src=? OR dst=?", (bead_id, bead_id)
     ):
@@ -189,6 +195,55 @@ def blast_data(con: sqlite3.Connection, bead_id: str) -> dict[str, Any]:
     }
 
 
+def hydrate(con: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    """Fetch everything render() needs in two batched queries: the rows' full
+    edge set and the titles of every endpoint. Fixes the per-row/per-edge N+1."""
+    con.row_factory = sqlite3.Row
+    records = [dict(r) | {"neighborhood": {}} for r in rows]
+    if not records:
+        return []
+    by_id = {rec["id"]: rec for rec in records}
+    ids = list(by_id)
+    ph = ",".join("?" * len(ids))
+    edges = con.execute(
+        f"SELECT src, dst, kind FROM edges WHERE src IN ({ph}) OR dst IN ({ph})",
+        [*ids, *ids],
+    ).fetchall()
+
+    endpoints = sorted({e for edge in edges for e in (edge["src"], edge["dst"])})
+    titles: dict[str, str] = {}
+    if endpoints:
+        ph2 = ",".join("?" * len(endpoints))
+        for t in con.execute(f"SELECT id, title, status FROM docs WHERE id IN ({ph2})", endpoints):
+            titles[t["id"]] = f"{t['title']} [{t['status']}]"
+
+    for edge in edges:
+        for bead_id in dict.fromkeys((edge["src"], edge["dst"])):
+            rec = by_id.get(bead_id)
+            if rec is None:
+                continue
+            direction = "out" if edge["src"] == bead_id else "in"
+            other = edge["dst"] if direction == "out" else edge["src"]
+            label = _EDGE_LABELS.get((edge["kind"], direction), edge["kind"])
+            title = "" if edge["kind"] == "gh-ref" else titles.get(other, "(external)")
+            rec["neighborhood"].setdefault(label, []).append((other, title))
+    return records
+
+
+def hydrate_blast(con: sqlite3.Connection, data: dict[str, Any]) -> dict[str, Any]:
+    """Attach a `labels` map ("title [status]" per id) so render_blast is pure."""
+    con.row_factory = sqlite3.Row
+    ids = sorted(
+        {*data["blocked_by_transitively"], *data["blocks_transitively"], *data["epic_ancestry"]}
+    )
+    labels: dict[str, str] = {}
+    if ids:
+        ph = ",".join("?" * len(ids))
+        for t in con.execute(f"SELECT id, title, status FROM docs WHERE id IN ({ph})", ids):
+            labels[t["id"]] = f"{t['title']} [{t['status']}]"
+    return {**data, "labels": labels}
+
+
 def render_header(r: sqlite3.Row | dict[str, Any]) -> str:
     if r["kind"] == "memory":
         return f"═══ {r['id']} [MEMORY]"
@@ -198,27 +253,28 @@ def render_header(r: sqlite3.Row | dict[str, Any]) -> str:
     return f"═══ {r['id']} [{status_str} · {prio} · {r['itype']} · {stamp}]\n    {r['title']}"
 
 
-def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int) -> str:
+def render(records: list[dict[str, Any]], budget: int) -> str:
+    """Pure: hydrated records + budget in, formatted text out. All budget and
+    truncation logic lives here, testable without an index."""
     if budget <= 0:
         return ""
-    if not rows:
+    if not records:
         msg = "no matches — try fewer terms, or status:all"
         return msg if len(msg) <= budget else msg[:budget]
 
-    con.row_factory = sqlite3.Row
     output_blocks: list[str] = []
     current_len = 0
-    num_rows = len(rows)
+    num_rows = len(records)
     target_per_doc = max(budget // num_rows, 1)
 
-    for idx, r in enumerate(rows):
+    for r in records:
         sep_len = 2 if output_blocks else 0
         remaining_total = budget - current_len - sep_len
         if remaining_total <= 0:
             break
 
         header = render_header(r)
-        hood = neighborhood(con, r["id"])
+        hood = r["neighborhood"]
         hood_lines = []
         if hood:
             hood_lines.append("    ── neighborhood ──")
@@ -289,17 +345,21 @@ def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int)
     return rendered[:budget]
 
 
-def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24_000) -> str:
+def format_output(con: sqlite3.Connection, rows: list[sqlite3.Row], budget: int) -> str:
+    return render(hydrate(con, rows), budget)
+
+
+def render_blast(data: dict[str, Any], budget: int = 24_000) -> str:
+    """Pure counterpart of format_blast: expects hydrate_blast()-style data."""
     if budget <= 0:
         return ""
-    con.row_factory = sqlite3.Row
+    labels = data.get("labels", {})
     lines = [render_header(data["root"])]
 
     def show(label: str, items: list[str]) -> None:
         lines.append(f"\n{label}: {len(items) or 'none'}")
         for i in items:
-            r = con.execute("SELECT title, status FROM docs WHERE id=?", (i,)).fetchone()
-            lines.append(f"  {i}  {r['title'] if r else ''} [{r['status'] if r else '?'}]")
+            lines.append(f"  {i}  {labels[i]}" if i in labels else f"  {i}   [?]")
 
     show("this bead is blocked by (transitively)", data["blocked_by_transitively"])
     show("beads this blocks (transitively)", data["blocks_transitively"])
@@ -312,3 +372,7 @@ def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24
             return full_text[:budget - len(notice)].rstrip() + notice
         return full_text[:budget]
     return full_text
+
+
+def format_blast(con: sqlite3.Connection, data: dict[str, Any], budget: int = 24_000) -> str:
+    return render_blast(hydrate_blast(con, data), budget)
