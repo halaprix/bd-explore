@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from bd_explore.constants import DEFAULT_BUDGET_CHARS, DEFAULT_SEEDS, VERSION
 from bd_explore.index import find_store, open_index
@@ -60,6 +60,15 @@ SERVER_INSTRUCTIONS = (
 )
 
 
+def _safe_int(val: Any, default: int) -> int:
+    """Defensive integer conversion helper for query limits and budgets."""
+    try:
+        parsed = int(val)
+        return parsed if parsed > 0 else default
+    except (ValueError, TypeError):
+        return default
+
+
 class McpServer:
     def __init__(self, default_store: Path | str | None = None) -> None:
         self.default_store = Path(default_store) if default_store else None
@@ -103,13 +112,16 @@ class McpServer:
                     "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
                 }
             args = params.get("arguments") or {}
-            result_text = self._execute_explore(args)
+            result_text, is_error = self._execute_explore(args)
+            result_payload: dict[str, Any] = {
+                "content": [{"type": "text", "text": result_text}],
+            }
+            if is_error:
+                result_payload["isError"] = True
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": {
-                    "content": [{"type": "text", "text": result_text}],
-                },
+                "result": result_payload,
             }
 
         if msg_id is not None:
@@ -120,29 +132,36 @@ class McpServer:
             }
         return None
 
-    def _execute_explore(self, args: dict) -> str:
+    def _execute_explore(self, args: dict) -> tuple[str, bool]:
         store_arg = args.get("store")
+        con = None
         try:
             store_path = find_store(store_arg) if store_arg else (self.default_store or find_store())
             con = open_index(store_path)
+
+            blast_id = args.get("blast")
+            if blast_id:
+                try:
+                    data = blast_data(con, blast_id)
+                    return format_blast(con, data), False
+                except Exception as e:
+                    return f"bd-explore blast error: {e}", True
+
+            query_str = args.get("query") or ""
+            limit = _safe_int(args.get("limit"), DEFAULT_SEEDS)
+            budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS)
+
+            text, filters = parse_query(query_str)
+            rows = search(con, text, filters, limit)
+            return format_output(con, rows, budget), False
         except Exception as e:
-            return f"bd-explore error: {e}"
-
-        blast_id = args.get("blast")
-        if blast_id:
-            try:
-                data = blast_data(con, blast_id)
-                return format_blast(con, data)
-            except Exception as e:
-                return f"bd-explore blast error: {e}"
-
-        query_str = args.get("query") or ""
-        limit = int(args.get("limit") or DEFAULT_SEEDS)
-        budget = int(args.get("budget") or DEFAULT_BUDGET_CHARS)
-
-        text, filters = parse_query(query_str)
-        rows = search(con, text, filters, limit)
-        return format_output(con, rows, budget)
+            return f"bd-explore error: {e}", True
+        finally:
+            if con is not None:
+                try:
+                    con.close()
+                except Exception:
+                    pass
 
     def handle_stream(self, in_stream: BinaryIO, out_stream: BinaryIO) -> None:
         try:
@@ -152,6 +171,15 @@ class McpServer:
                     continue
                 try:
                     req = json.loads(line_str)
+                    if not isinstance(req, dict):
+                        err_resp = {
+                            "jsonrpc": "2.0",
+                            "id": None,
+                            "error": {"code": -32600, "message": "Invalid Request: JSON payload must be an object"},
+                        }
+                        out_stream.write((json.dumps(err_resp) + "\n").encode("utf-8"))
+                        out_stream.flush()
+                        continue
                     resp = self.handle_request(req)
                     if resp is not None:
                         out_bytes = (json.dumps(resp) + "\n").encode("utf-8")
