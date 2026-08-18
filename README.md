@@ -1,8 +1,29 @@
 # bd-explore
 
+[![CI](https://github.com/halaprix/bd-explore/actions/workflows/ci.yml/badge.svg)](https://github.com/halaprix/bd-explore/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
 Ask a [beads](https://github.com/gastownhall/beads) store questions, the way `codegraph explore` asks a codebase: one call returns the most relevant beads **verbatim** — description, notes, comments, close reason — plus each hit's relationship neighborhood, under an output budget.
 
 Fills the gap the stock `bd` CLI leaves: `bd search` covers titles, `bd query` is structured-only, and nothing searches **notes, comments, or close reasons** — which is where a mature store keeps most of its knowledge. `bd memories` is indexed too (the plain CLI truncates memory bodies; this returns them whole).
+
+**Docs site:** https://halaprix.github.io/bd-explore/
+
+```text
+$ bd-explore "why did we re-point SYRP status:open"
+
+═══ SYRP-142 [OPEN · P1 · task · updated 2026-08-12]
+    Re-point SYRP feed to the v2 oracle
+    The v1 oracle staleness window regressed after the chain upgrade…
+    COMMENT (ksz 2026-08-11):
+    Decision: re-point rather than patch v1 — see close reason on SYRP-118.
+    ── neighborhood ──
+    blocked by: SYRP-139 — Oracle failover runbook [in_progress]
+    child of: SYRP-100 — Oracle migration epic [in_progress]
+    mentions: SYRP-118
+```
 
 ---
 
@@ -192,13 +213,49 @@ If there is no `.beads/` directory, skip bd-explore.
 
 ---
 
-## Testing
+## Architecture
 
-Run the full test suite using Python's standard library `unittest`:
+The explore pipeline sits behind one deep module; everything else adapts to it.
+
+```
+              CLI (cli.py)              MCP server (mcp.py)
+                   │  thin adapters: args / JSON-RPC  │
+                   └──────────────┬───────────────────┘
+                                  ▼
+                      Explorer (explorer.py)
+        explore(query, …) → str   ·   blast(id, …) → str
+     owns store discovery, index freshness, connection
+       lifetime, defaults/clamping, canonical errors
+                   ┌──────────────┴───────────────────┐
+                   ▼                                  ▼
+          index.py (SQLite FTS5,             search.py (BM25 search,
+          mention mining, cache)             hydrate → pure render)
+```
+
+- **`explorer.py`** — the only interface callers need: `explore()` / `blast()` in, formatted text out, `ExploreError` on failure.
+- **`index.py`** — parses `.beads/issues.jsonl` and `bd memories` into a derived SQLite FTS5 cache, rebuilt atomically when the export changes.
+- **`search.py`** — BM25 search and query parsing; `hydrate()` batch-fetches neighborhoods and titles (two queries total), `render()` is pure and owns all budget/truncation logic.
+- **`installer/`** — multi-target platform adapters behind a common install/uninstall seam.
+
+Domain vocabulary lives in [CONTEXT.md](CONTEXT.md); repo conventions in [CLAUDE.md](CLAUDE.md).
+
+---
+
+## Development
 
 ```bash
+# Run the full test suite (stdlib unittest — no test dependencies either)
 PYTHONPATH=src python3 -m unittest discover tests -v
+
+# Run one module / one case
+PYTHONPATH=src python3 -m unittest tests.test_explorer
+PYTHONPATH=src python3 -m unittest tests.test_render.TestRenderPure
+
+# Editable install
+pip install -e .
 ```
+
+CI runs the suite on Linux and macOS across Python 3.10–3.14. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 

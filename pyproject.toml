@@ -5,16 +5,33 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bd-explore"
 version = "0.1.0"
-description = "Ask a beads store questions, codegraph-style"
+description = "Ask a beads store questions, codegraph-style: verbatim issue content plus relationship graphs under a strict output budget, with a zero-dependency MCP server"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "halaprix" }]
+keywords = ["beads", "issue-tracker", "mcp", "model-context-protocol", "fts5", "search", "ai-agents", "cli"]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Bug Tracking",
+    "Topic :: Text Processing :: Indexing",
 ]
+
+[project.urls]
+Homepage = "https://halaprix.github.io/bd-explore/"
+Repository = "https://github.com/halaprix/bd-explore"
+Issues = "https://github.com/halaprix/bd-explore/issues"
+Changelog = "https://github.com/halaprix/bd-explore/blob/main/CHANGELOG.md"
 
 [project.scripts]
 bd-explore = "bd_explore.cli:main"
