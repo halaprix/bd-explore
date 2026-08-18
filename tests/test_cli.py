@@ -397,6 +397,7 @@ class TestCli(unittest.TestCase):
             )
             out = buf.getvalue()
             self.assertIn("claude", out)
+            self.assertIn("/mock/claude.json", out)
             self.assertIn("Uninstallation complete", out)
 
     def test_uninstall_subcommand_interactive_cancelled(self):

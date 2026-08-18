@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bd-explore"
+version = "0.1.0"
+description = "Ask a beads store questions, codegraph-style"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "halaprix" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.scripts]
+bd-explore = "bd_explore.cli:main"
+bd_explore = "bd_explore.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

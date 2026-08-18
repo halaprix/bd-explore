@@ -185,7 +185,7 @@ def _handle_uninstall(args: argparse.Namespace) -> int:
             files = r.get("files", [])
             file_paths = [f.get("path", str(f)) if isinstance(f, dict) else str(f) for f in files]
             files_str = f" -> {', '.join(file_paths)}" if file_paths else ""
-            print(f"  ✓ {t_name}: uninstalled")
+            print(f"  ✓ {t_name}: uninstalled{files_str}")
         else:
             print(f"  ✗ {t_name}: error ({r.get('message', '')})")
 
