@@ -570,7 +570,7 @@ class TestMcpPolish(unittest.TestCase):
         )
         self.assertEqual(resp["id"], 10)
         self.assertTrue(resp["result"]["isError"])
-        self.assertIn("bd-explore error", resp["result"]["content"][0]["text"])
+        self.assertIn("store export not found", resp["result"]["content"][0]["text"])
 
     def test_blast_error_is_error_flag(self):
         server = McpServer(default_store=self.store_file)
@@ -588,7 +588,7 @@ class TestMcpPolish(unittest.TestCase):
         )
         self.assertEqual(resp["id"], 11)
         self.assertTrue(resp["result"]["isError"])
-        self.assertIn("bd-explore blast error", resp["result"]["content"][0]["text"])
+        self.assertIn("no bead matching 'nonexistent-id'", resp["result"]["content"][0]["text"])
 
     def test_defensive_limit_and_budget_parsing(self):
         server = McpServer(default_store=self.store_file)
@@ -618,7 +618,7 @@ class TestMcpPolish(unittest.TestCase):
         server = McpServer(default_store=self.store_file)
         closed_flags = []
 
-        original_open = sys.modules["bd_explore.mcp"].open_index
+        original_open = sys.modules["bd_explore.explorer"].open_index
 
         class ConProxy:
             def __init__(self, con):
@@ -635,7 +635,7 @@ class TestMcpPolish(unittest.TestCase):
             real_con = original_open(*args, **kwargs)
             return ConProxy(real_con)
 
-        with patch("bd_explore.mcp.open_index", side_effect=mock_open_index):
+        with patch("bd_explore.explorer.open_index", side_effect=mock_open_index):
             self.run_rpc_raw(
                 server,
                 json.dumps({

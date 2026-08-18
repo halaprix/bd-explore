@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from bd_explore.constants import DEFAULT_BUDGET_CHARS, DEFAULT_SEEDS, VERSION
-from bd_explore.index import find_store, open_index
-from bd_explore.search import blast_data, format_blast, format_output, parse_query, search
+from bd_explore.explorer import ExploreError, blast, explore
+from bd_explore.index import find_store
 
 __all__ = [
     "TOOL_SCHEMA",
@@ -58,17 +58,6 @@ SERVER_INSTRUCTIONS = (
     "call `bd_explore` to ask questions about beads, tasks, epics, bug fixes, architecture "
     "decisions, and handoff notes."
 )
-
-
-def _safe_int(val: Any, default: int, min_val: int = 1) -> int:
-    """Defensive integer conversion helper for query limits and budgets."""
-    if val is None or isinstance(val, bool):
-        return default
-    try:
-        parsed = int(val)
-        return max(parsed, min_val) if parsed > 0 else default
-    except (ValueError, TypeError):
-        return default
 
 
 class McpServer:
@@ -138,36 +127,24 @@ class McpServer:
         return None
 
     def _execute_explore(self, args: dict) -> tuple[str, bool]:
-        store_arg = args.get("store")
-        con = None
+        store = args.get("store") or self.default_store
         try:
-            store_path = find_store(store_arg) if store_arg else (self.default_store or find_store())
-            con = open_index(store_path)
-
             blast_id = args.get("blast")
             if blast_id:
-                try:
-                    data = blast_data(con, blast_id)
-                    budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS, min_val=100)
-                    return format_blast(con, data, budget=budget), False
-                except Exception as e:
-                    return f"bd-explore blast error: {e}", True
-
-            query_str = args.get("query") or ""
-            limit = _safe_int(args.get("limit"), DEFAULT_SEEDS, min_val=1)
-            budget = _safe_int(args.get("budget"), DEFAULT_BUDGET_CHARS, min_val=100)
-
-            text, filters = parse_query(query_str)
-            rows = search(con, text, filters, limit)
-            return format_output(con, rows, budget), False
+                return blast(blast_id, store=store, budget=args.get("budget")), False
+            return (
+                explore(
+                    args.get("query") or "",
+                    store=store,
+                    limit=args.get("limit"),
+                    budget=args.get("budget"),
+                ),
+                False,
+            )
+        except ExploreError as e:
+            return str(e), True
         except Exception as e:
             return f"bd-explore error: {e}", True
-        finally:
-            if con is not None:
-                try:
-                    con.close()
-                except Exception:
-                    pass
 
     def handle_stream(self, in_stream: BinaryIO, out_stream: BinaryIO) -> None:
         """Process messages from in_stream supporting both Content-Length headers and NDJSON."""

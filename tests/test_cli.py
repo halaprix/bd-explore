@@ -443,7 +443,10 @@ class TestCli(unittest.TestCase):
     def test_broken_pipe_error_handling(self):
         from bd_explore.cli import main
 
-        with patch("builtins.print", side_effect=BrokenPipeError):
+        # Patch sys.stdout too: main()'s handler closes it, and closing the
+        # real one breaks argparse's tty detection in later tests.
+        with patch("builtins.print", side_effect=BrokenPipeError), \
+             patch("sys.stdout", io.StringIO()):
             code = main(["--store", str(self.store_file), "JWT"])
             self.assertEqual(code, 0)
 

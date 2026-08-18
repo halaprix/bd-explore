@@ -11,6 +11,7 @@ src/bd_explore/
 ├── __init__.py         # Package root
 ├── __main__.py         # python -m bd_explore entrypoint
 ├── constants.py        # Shared constants, defaults (budget, limits, dependency kinds)
+├── explorer.py         # Deep explore module: explore()/blast() own the whole pipeline (store discovery, index freshness, connection lifetime, defaults, error text)
 ├── index.py            # SQLite FTS5 indexing, mention mining, store discovery, caching
 ├── search.py           # BM25 search, query parsing, neighborhood graph, blast radius, formatting
 ├── mcp.py              # Pure Python stdio JSON-RPC 2.0 MCP server

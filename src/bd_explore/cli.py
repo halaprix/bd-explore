@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from pathlib import Path
-from typing import Any
 
 from bd_explore.constants import DEFAULT_BUDGET_CHARS, DEFAULT_SEEDS, VERSION
-from bd_explore.index import find_store, open_index
+from bd_explore.explorer import ExploreError, blast, explore
+from bd_explore.index import find_store
 from bd_explore.installer import (
     TARGET_REGISTRY,
     detect_installed_targets,
@@ -18,7 +16,6 @@ from bd_explore.installer import (
     run_uninstaller,
 )
 from bd_explore.mcp import run_mcp_server
-from bd_explore.search import blast_data, format_blast, format_output, parse_query, search
 
 __all__ = ["main"]
 
@@ -311,37 +308,21 @@ def main(argv: list[str] | None = None) -> int:
             _error("bd-explore: error: give a query, --blast <id>, or --rebuild")
 
         try:
-            store = find_store(args.store)
-        except (FileNotFoundError, ValueError) as e:
-            _error(str(e))
-
-        try:
-            con = open_index(store, force=args.rebuild)
-        except Exception as e:
-            _error(f"bd-explore: index error: {e}")
-
-        try:
             if args.blast:
-                try:
-                    data = blast_data(con, args.blast)
-                    print(format_blast(con, data))
-                    return 0
-                except ValueError as e:
-                    _error(str(e))
-
-            if not args.query:
-                if args.rebuild:
-                    n = con.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-                    print(f"rebuilt: {n} docs from {store}")
-                    return 0
-                _error("bd-explore: error: give a query, --blast <id>, or --rebuild")
-
-            text, filters = parse_query(" ".join(args.query))
-            rows = search(con, text, filters, args.limit)
-            print(format_output(con, rows, args.budget))
+                print(blast(args.blast, store=args.store, budget=args.budget, rebuild=args.rebuild))
+            else:
+                print(
+                    explore(
+                        " ".join(args.query),
+                        store=args.store,
+                        limit=args.limit,
+                        budget=args.budget,
+                        rebuild=args.rebuild,
+                    )
+                )
             return 0
-        finally:
-            con.close()
+        except ExploreError as e:
+            _error(str(e))
     except BrokenPipeError:
         try:
             sys.stdout.close()

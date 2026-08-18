@@ -252,7 +252,8 @@ class TestMcpServer(unittest.TestCase):
         )
         self.assertEqual(resp["id"], 8)
         content = resp["result"]["content"]
-        self.assertIn("bd-explore error", content[0]["text"])
+        self.assertIn("store export not found", content[0]["text"])
+        self.assertTrue(resp["result"].get("isError"))
 
     def test_blast_error_in_explore(self):
         server = McpServer(default_store=self.store_file)
@@ -270,7 +271,8 @@ class TestMcpServer(unittest.TestCase):
         )
         self.assertEqual(resp["id"], 9)
         content = resp["result"]["content"]
-        self.assertIn("bd-explore blast error", content[0]["text"])
+        self.assertIn("no bead matching 'nonexistent-id'", content[0]["text"])
+        self.assertTrue(resp["result"].get("isError"))
 
     def test_run_mcp_server(self):
         req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode("utf-8") + b"\n"
