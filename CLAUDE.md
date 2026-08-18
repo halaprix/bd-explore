@@ -46,9 +46,7 @@ PYTHONPATH=src python3 -m unittest tests.test_search.TestSearchEngine.test_bm25_
 - **Zero Runtime Dependencies**: The core package, CLI, and MCP server must rely exclusively on Python 3.10+ standard library modules (`sqlite3`, `argparse`, `json`, `pathlib`, `re`, `subprocess`, `urllib`, `dataclasses`, etc.).
 - **Typing & Modern Python**: Use `from __future__ import annotations` in every Python module. Use modern type annotations (`str | None`, `list[str]`, `dict[str, Any]`).
 - **Atomic Operations**: All configuration updates and cache writes should write to temporary files and rename atomically (`replace` / `tempfile`).
-- **Idempotent Instructions**: Rule and configuration injections must use marker fences (`
-
-`) to allow clean updates and uninstalls.
+- **Idempotent Instructions**: Rule and configuration injections must use marker fences (`<!-- BD_EXPLORE_START -->` / `<!-- BD_EXPLORE_END -->`) to allow clean updates and uninstalls.
 - **Output Budgeting**: All explore/query responses must strictly respect the character budget parameter to prevent overflowing LLM context windows.
 
 ## CLI Commands

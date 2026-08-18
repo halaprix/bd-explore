@@ -86,10 +86,12 @@ else
     # Remote / standalone installation via git clone if available
     if command -v git >/dev/null 2>&1; then
         TMP_CLONE="$(mktemp -d)"
+        trap 'rm -rf "$TMP_CLONE"' EXIT INT TERM
         git clone --depth 1 https://github.com/gastownhall/bd-explore.git "$TMP_CLONE"
         rm -rf "$INSTALL_DIR/src"
         cp -R "$TMP_CLONE/src" "$INSTALL_DIR/"
         rm -rf "$TMP_CLONE"
+        trap - EXIT INT TERM
     else
         echo "Error: Cannot locate bd-explore source files and git is not installed." >&2
         exit 1
